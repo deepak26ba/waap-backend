@@ -71,4 +71,3 @@ func TestErrorHandler_Interception(t *testing.T) {
 		}
 	})
 }
-
