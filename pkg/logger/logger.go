@@ -23,4 +23,3 @@ func New(env string) (*zap.Logger, error) {
 
 	return cfg.Build()
 }
-

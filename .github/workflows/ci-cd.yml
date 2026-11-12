@@ -1,0 +1,234 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, dev, "feat/*", "fix/*" ]
+  pull_request:
+    branches: [ main, dev ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Deployment Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: auto
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # 1. Detect Changes
+  # ----------------------------------------------------------------------------
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Path Filter for Backend Changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'cmd/**'
+              - 'internal/**'
+              - 'pkg/**'
+              - 'sql/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'sqlc.yaml'
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'render.yaml'
+              - '.github/workflows/ci-cd.yml'
+
+  # ----------------------------------------------------------------------------
+  # 2. Lint & Static Analysis
+  # ----------------------------------------------------------------------------
+  lint:
+    name: Lint & Static Code Analysis
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Check Code Formatting
+        run: |
+          diffs=$(gofmt -l .)
+          if [ -n "$diffs" ]; then
+            echo "The following files are not formatted properly:"
+            echo "$diffs"
+            exit 1
+          fi
+
+      - name: Run Go Vet
+        run: go vet ./...
+
+  # ----------------------------------------------------------------------------
+  # 3. Unit & Integration Tests
+  # ----------------------------------------------------------------------------
+  test:
+    name: Unit & Integration Tests
+    needs: [detect-changes, lint]
+    if: ${{ needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: waap_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d waap_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Download Dependencies
+        run: go mod download
+
+      - name: Run Tests with Race Detector and Coverage
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_NAME: waap_db
+          DB_SSLMODE: disable
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/waap_db?sslmode=disable
+          DB_AUTO_MIGRATE: "true"
+        run: |
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Verify Service Binary Compilation
+        run: |
+          go build -v -o /dev/null ./cmd/api
+
+  # ----------------------------------------------------------------------------
+  # 4. Docker Image Build & Packaging
+  # ----------------------------------------------------------------------------
+  package:
+    name: Build & Package Docker Image
+    needs: [detect-changes, test]
+    if: ${{ needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=dev-latest,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=ref,event=branch
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')) || github.event_name == 'workflow_dispatch' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ----------------------------------------------------------------------------
+  # 5. Trigger Deployment on Render
+  # ----------------------------------------------------------------------------
+  deploy:
+    name: Trigger Render Deployment
+    needs: [detect-changes, test, package]
+    if: ${{ (needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.event_name == 'workflow_dispatch') && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Deploy Hook
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_ENV: ${{ inputs.environment }}
+          PROD_HOOK: ${{ secrets.RENDER_PROD_DEPLOY_HOOK }}
+          STAGING_HOOK: ${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}
+          DEFAULT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          TARGET_ENV="production"
+          if [ -n "$INPUT_ENV" ]; then
+            TARGET_ENV="$INPUT_ENV"
+          elif [ "$REF_NAME" = "dev" ]; then
+            TARGET_ENV="staging"
+          fi
+
+          HOOK_URL=""
+          if [ "$TARGET_ENV" = "staging" ] && [ -n "$STAGING_HOOK" ]; then
+            HOOK_URL="$STAGING_HOOK"
+          elif [ "$TARGET_ENV" = "production" ] && [ -n "$PROD_HOOK" ]; then
+            HOOK_URL="$PROD_HOOK"
+          else
+            HOOK_URL="$DEFAULT_HOOK"
+          fi
+
+          if [ -z "$HOOK_URL" ]; then
+            echo "::notice:: No Render Deploy Hook secret configured. To trigger automated deployments, add RENDER_DEPLOY_HOOK or RENDER_PROD_DEPLOY_HOOK to GitHub repository secrets."
+            exit 0
+          fi
+
+          echo "Triggering Render $TARGET_ENV deployment..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$HOOK_URL")
+
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "Render deployment triggered successfully (HTTP $HTTP_STATUS)"
+          else
+            echo "::error:: Render deployment trigger failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi

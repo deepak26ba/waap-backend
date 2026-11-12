@@ -77,4 +77,3 @@ func AutoMigrate(ctx context.Context, pool *pgxpool.Pool) error {
 
 	return tx.Commit(ctx)
 }
-

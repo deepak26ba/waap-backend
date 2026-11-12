@@ -59,4 +59,3 @@ func ZapRecovery(log *zap.Logger) gin.HandlerFunc {
 		c.Next()
 	}
 }
-

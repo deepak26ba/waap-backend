@@ -100,4 +100,3 @@ func TestCORS_Wildcard(t *testing.T) {
 		t.Errorf("expected Access-Control-Allow-Origin '*', got %q", origin)
 	}
 }
-

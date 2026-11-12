@@ -58,4 +58,3 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 		c.Next()
 	}
 }
-

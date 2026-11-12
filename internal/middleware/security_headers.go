@@ -31,4 +31,3 @@ func SecurityHeaders() gin.HandlerFunc {
 		c.Next()
 	}
 }
-

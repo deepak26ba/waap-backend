@@ -85,4 +85,3 @@ func TestServerRouter_HealthCheckNilPool(t *testing.T) {
 		t.Errorf("expected status 'unhealthy', got '%v'", resp["status"])
 	}
 }
-

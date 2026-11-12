@@ -39,4 +39,3 @@ func TestAutoMigrate_NilPool(t *testing.T) {
 		t.Fatal("expected error with nil pool, got nil")
 	}
 }
-
