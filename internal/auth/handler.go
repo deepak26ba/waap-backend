@@ -110,3 +110,4 @@ func (h *Handler) Refresh(c *gin.Context) {
 
 	response.OK(c, tokens)
 }
+

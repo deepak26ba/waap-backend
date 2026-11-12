@@ -236,3 +236,4 @@ func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (*T
 
 	return GenerateTokenPair(user.ID, user.Email, user.Role, s.jwtSecret, s.accessTTL, s.refreshTTL)
 }
+
