@@ -43,19 +43,3 @@ func ZapLogger(log *zap.Logger) gin.HandlerFunc {
 		}
 	}
 }
-
-// ZapRecovery returns a gin.HandlerFunc that recovers from panics and logs with Zap.
-func ZapRecovery(log *zap.Logger) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Error("Panic recovered",
-					zap.Any("error", r),
-					zap.String("path", c.Request.URL.Path),
-				)
-				c.AbortWithStatus(http.StatusInternalServerError)
-			}
-		}()
-		c.Next()
-	}
-}

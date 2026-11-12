@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"waap-backend/pkg/response"
 )
 
 // ErrPayloadTooLarge is returned when a request body exceeds the configured maximum bytes.
@@ -44,13 +46,7 @@ func (l *limitedReadCloser) Read(p []byte) (int, error) {
 
 func (l *limitedReadCloser) abortPayloadTooLarge() {
 	if !l.context.IsAborted() {
-		l.context.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{
-			"success": false,
-			"error": gin.H{
-				"code":    "PAYLOAD_TOO_LARGE",
-				"message": fmt.Sprintf("request body exceeds maximum allowed size of %d bytes", l.maxBytes),
-			},
-		})
+		response.PayloadTooLarge(l.context, response.ErrCodePayloadTooLarge, fmt.Sprintf("request body exceeds maximum allowed size of %d bytes", l.maxBytes))
 	}
 }
 

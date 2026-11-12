@@ -1,12 +1,13 @@
 package middleware
 
 import (
-	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
+
+	"waap-backend/pkg/response"
 )
 
 type clientLimiter struct {
@@ -108,13 +109,7 @@ func (i *IPRateLimiter) Middleware() gin.HandlerFunc {
 		limiter := i.GetLimiter(ip)
 		if !limiter.Allow() {
 			c.Header("Retry-After", "60")
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"success": false,
-				"error": gin.H{
-					"code":    "RATE_LIMIT_EXCEEDED",
-					"message": "too many requests, please try again later",
-				},
-			})
+			response.TooManyRequests(c, response.ErrCodeTooManyRequests, "too many requests, please try again later")
 			return
 		}
 

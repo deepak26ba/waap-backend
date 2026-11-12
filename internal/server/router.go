@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -12,18 +13,27 @@ import (
 	"waap-backend/internal/config"
 	"waap-backend/internal/middleware"
 	"waap-backend/pkg/db"
+	"waap-backend/pkg/response"
 )
 
 // NewRouter constructs and configures the Gin engine with all global middleware and routes.
 func NewRouter(cfg *config.Config, pool *pgxpool.Pool, queries *db.Queries, log *zap.Logger) *gin.Engine {
-	var router *gin.Engine
+	router := gin.New()
 
 	if log != nil {
-		router = gin.New()
-		router.Use(middleware.ZapLogger(log), middleware.ZapRecovery(log))
-	} else {
-		router = gin.Default()
+		router.Use(middleware.ZapLogger(log))
 	}
+	router.Use(middleware.Recovery(log))
+	router.Use(middleware.ErrorHandler(log))
+
+	// Handle 404 and 405 uniformly with response.Envelope
+	router.NoRoute(func(c *gin.Context) {
+		response.NotFound(c, response.ErrCodeNotFound, fmt.Sprintf("path %s not found", c.Request.URL.Path))
+	})
+	router.HandleMethodNotAllowed = true
+	router.NoMethod(func(c *gin.Context) {
+		response.Error(c, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", fmt.Sprintf("method %s not allowed on path %s", c.Request.Method, c.Request.URL.Path))
+	})
 
 	// Security & Limits Middleware Pipeline
 	router.Use(middleware.SecurityHeaders())
