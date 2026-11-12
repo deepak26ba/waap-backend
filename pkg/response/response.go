@@ -49,4 +49,3 @@ func Error(c *gin.Context, statusCode int, code, message string) {
 		},
 	})
 }
-
