@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -29,6 +30,12 @@ type Config struct {
 
 	// Auth
 	JWTSecret string
+
+	// Security & Limits
+	CORSAllowedOrigins []string
+	MaxBodySizeBytes   int64
+	RateLimitRPS       float64
+	RateLimitBurst     int
 }
 
 func LoadConfig() (*Config, error) {
@@ -53,21 +60,37 @@ func LoadConfig() (*Config, error) {
 			dbUser, dbPass, dbHost, dbPort, dbName, dbSSLMode)
 	}
 
+	corsOriginsStr := getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080")
+	var corsOrigins []string
+	for _, o := range strings.Split(corsOriginsStr, ",") {
+		if trimmed := strings.TrimSpace(o); trimmed != "" {
+			corsOrigins = append(corsOrigins, trimmed)
+		}
+	}
+
+	maxBodySizeBytes := int64(getEnvAsInt("MAX_BODY_SIZE_BYTES", 2*1024*1024)) // 2MB default
+	rateLimitRPS := getEnvAsFloat("RATE_LIMIT_RPS", 20.0)
+	rateLimitBurst := getEnvAsInt("RATE_LIMIT_BURST", 40)
+
 	cfg := &Config{
-		Port:              getEnv("PORT", "8080"),
-		Env:               getEnv("ENV", "development"),
-		DBHost:            dbHost,
-		DBPort:            dbPort,
-		DBUser:            dbUser,
-		DBPassword:        dbPass,
-		DBName:            dbName,
-		DBSSLMode:         dbSSLMode,
-		DBMaxConns:        dbMaxConns,
-		DBMinConns:        dbMinConns,
-		DBMaxConnLifetime: dbMaxConnLifetime,
-		DBMaxConnIdleTime: dbMaxConnIdleTime,
-		DatabaseURL:       dbURL,
-		JWTSecret:         getEnv("JWT_SECRET", "default-dev-secret-replace-in-production"),
+		Port:               getEnv("PORT", "8080"),
+		Env:                getEnv("ENV", "development"),
+		DBHost:             dbHost,
+		DBPort:             dbPort,
+		DBUser:             dbUser,
+		DBPassword:         dbPass,
+		DBName:             dbName,
+		DBSSLMode:          dbSSLMode,
+		DBMaxConns:         dbMaxConns,
+		DBMinConns:         dbMinConns,
+		DBMaxConnLifetime:  dbMaxConnLifetime,
+		DBMaxConnIdleTime:  dbMaxConnIdleTime,
+		DatabaseURL:        dbURL,
+		JWTSecret:          getEnv("JWT_SECRET", "default-dev-secret-replace-in-production"),
+		CORSAllowedOrigins: corsOrigins,
+		MaxBodySizeBytes:   maxBodySizeBytes,
+		RateLimitRPS:       rateLimitRPS,
+		RateLimitBurst:     rateLimitBurst,
 	}
 
 	return cfg, nil
@@ -92,6 +115,18 @@ func getEnvAsInt(key string, defaultVal int) int {
 	return val
 }
 
+func getEnvAsFloat(key string, defaultVal float64) float64 {
+	valStr := os.Getenv(key)
+	if valStr == "" {
+		return defaultVal
+	}
+	val, err := strconv.ParseFloat(valStr, 64)
+	if err != nil {
+		return defaultVal
+	}
+	return val
+}
+
 func getEnvAsDuration(key string, defaultVal time.Duration) time.Duration {
 	valStr := os.Getenv(key)
 	if valStr == "" {
@@ -103,4 +138,3 @@ func getEnvAsDuration(key string, defaultVal time.Duration) time.Duration {
 	}
 	return d
 }
-
