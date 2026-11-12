@@ -70,4 +70,3 @@ func registerObservabilityRoutes(r *gin.Engine, pool *pgxpool.Pool, log *zap.Log
 		})
 	})
 }
-

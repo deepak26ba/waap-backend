@@ -99,4 +99,3 @@ func TestBodySizeLimiter_Default2MBExceeded(t *testing.T) {
 		t.Fatalf("expected status 413 for >2MB payload, got %d", w.Code)
 	}
 }
-

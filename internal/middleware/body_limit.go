@@ -86,4 +86,3 @@ func BodySizeLimiter(maxBytes int64) gin.HandlerFunc {
 		c.Next()
 	}
 }
-

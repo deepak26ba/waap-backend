@@ -127,4 +127,3 @@ func RateLimiter(rps float64, burst int) gin.HandlerFunc {
 	limiter := NewIPRateLimiter(rate.Limit(rps), burst, 10*time.Minute)
 	return limiter.Middleware()
 }
-

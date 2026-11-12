@@ -68,4 +68,3 @@ func HealthCheck(ctx context.Context, pool *pgxpool.Pool) error {
 
 	return nil
 }
-

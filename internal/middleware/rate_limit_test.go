@@ -90,4 +90,3 @@ func TestRateLimiter_DifferentIPsAreIsolated(t *testing.T) {
 		t.Fatalf("IP2: expected 200, got %d", w2.Code)
 	}
 }
-

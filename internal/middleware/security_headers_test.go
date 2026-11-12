@@ -44,4 +44,3 @@ func TestSecurityHeaders(t *testing.T) {
 		}
 	}
 }
-

@@ -1,0 +1,50 @@
+name: Manual Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Deployment Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  deploy:
+    name: Trigger Render Deployment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Deploy Hook
+        env:
+          TARGET_ENV: ${{ inputs.environment }}
+          PROD_HOOK: ${{ secrets.RENDER_PROD_DEPLOY_HOOK }}
+          STAGING_HOOK: ${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}
+          DEFAULT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          HOOK_URL=""
+          if [ "$TARGET_ENV" = "staging" ] && [ -n "$STAGING_HOOK" ]; then
+            HOOK_URL="$STAGING_HOOK"
+          elif [ "$TARGET_ENV" = "production" ] && [ -n "$PROD_HOOK" ]; then
+            HOOK_URL="$PROD_HOOK"
+          else
+            HOOK_URL="$DEFAULT_HOOK"
+          fi
+
+          if [ -z "$HOOK_URL" ]; then
+            echo "::error:: No Render Deploy Hook secret configured for $TARGET_ENV. Set RENDER_PROD_DEPLOY_HOOK, RENDER_STAGING_DEPLOY_HOOK, or RENDER_DEPLOY_HOOK in repository secrets."
+            exit 1
+          fi
+
+          echo "Triggering Render $TARGET_ENV deployment..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$HOOK_URL")
+
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "Render deployment triggered successfully (HTTP $HTTP_STATUS)"
+          else
+            echo "::error:: Render deployment trigger failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi
+
