@@ -79,4 +79,3 @@ func TestRecovery_NormalRequestPassesThrough(t *testing.T) {
 		t.Errorf("expected success true")
 	}
 }
-
