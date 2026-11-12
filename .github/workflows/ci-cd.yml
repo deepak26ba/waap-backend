@@ -52,7 +52,8 @@ jobs:
               - 'Dockerfile'
               - '.dockerignore'
               - 'render.yaml'
-              - '.github/workflows/ci-cd.yml'
+              - '.gitattributes'
+              - '.github/workflows/**'
 
   # ----------------------------------------------------------------------------
   # 2. Lint & Static Analysis
