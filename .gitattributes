@@ -10,3 +10,4 @@
 *.md text eol=lf
 Dockerfile text eol=lf
 .env* text eol=lf
+
