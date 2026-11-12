@@ -1,0 +1,12 @@
+.git
+.github
+.env
+.env.*
+*.local
+*.exe
+*.test
+*.out
+bin/
+docs/
+scratch/
+
