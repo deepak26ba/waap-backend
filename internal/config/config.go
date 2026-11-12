@@ -27,6 +27,7 @@ type Config struct {
 	DBMaxConnLifetime time.Duration
 	DBMaxConnIdleTime time.Duration
 	DatabaseURL       string
+	AutoMigrate       bool
 
 	// Auth
 	JWTSecret string
@@ -71,6 +72,7 @@ func LoadConfig() (*Config, error) {
 	maxBodySizeBytes := int64(getEnvAsInt("MAX_BODY_SIZE_BYTES", 2*1024*1024)) // 2MB default
 	rateLimitRPS := getEnvAsFloat("RATE_LIMIT_RPS", 20.0)
 	rateLimitBurst := getEnvAsInt("RATE_LIMIT_BURST", 40)
+	autoMigrate := getEnvAsBool("DB_AUTO_MIGRATE", true)
 
 	cfg := &Config{
 		Port:               getEnv("PORT", "8080"),
@@ -86,6 +88,7 @@ func LoadConfig() (*Config, error) {
 		DBMaxConnLifetime:  dbMaxConnLifetime,
 		DBMaxConnIdleTime:  dbMaxConnIdleTime,
 		DatabaseURL:        dbURL,
+		AutoMigrate:        autoMigrate,
 		JWTSecret:          getEnv("JWT_SECRET", "default-dev-secret-replace-in-production"),
 		CORSAllowedOrigins: corsOrigins,
 		MaxBodySizeBytes:   maxBodySizeBytes,
@@ -125,6 +128,18 @@ func getEnvAsFloat(key string, defaultVal float64) float64 {
 		return defaultVal
 	}
 	return val
+}
+
+func getEnvAsBool(key string, defaultVal bool) bool {
+	valStr := os.Getenv(key)
+	if valStr == "" {
+		return defaultVal
+	}
+	b, err := strconv.ParseBool(valStr)
+	if err != nil {
+		return defaultVal
+	}
+	return b
 }
 
 func getEnvAsDuration(key string, defaultVal time.Duration) time.Duration {

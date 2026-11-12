@@ -25,6 +25,9 @@ services:
           name: waap-postgres
           property: connectionString
 
+      - key: DB_AUTO_MIGRATE
+        value: "true"
+
       - key: JWT_SECRET
         generateValue: true
 
@@ -55,8 +58,7 @@ services:
 databases:
   - name: waap-postgres
     databaseName: waap_db
-    user: postgres
+    user: waap_user
     plan: free
     region: oregon
     postgresMajorVersion: "16"
-
