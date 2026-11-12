@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"waap-backend/internal/config"
+	"waap-backend/internal/server"
 	"waap-backend/pkg/db"
 )
 
@@ -29,10 +30,11 @@ func TestHealthCheckProbe_Success(t *testing.T) {
 	}
 	defer pool.Close()
 
-	queries := db.New(pool)
-	router := setupRouter(pool, queries, zap.NewNop())
+	srv := server.New(cfg, pool, db.New(pool), zap.NewNop())
+	router := srv.Router()
 
 	req, _ := http.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -52,10 +54,26 @@ func TestHealthCheckProbe_Success(t *testing.T) {
 	if resp["database"] != "connected" {
 		t.Errorf("expected database 'connected', got '%v'", resp["database"])
 	}
+
+	// Verify OWASP security headers are present
+	if xfo := w.Header().Get("X-Frame-Options"); xfo != "DENY" {
+		t.Errorf("expected X-Frame-Options 'DENY', got '%v'", xfo)
+	}
+	if xcto := w.Header().Get("X-Content-Type-Options"); xcto != "nosniff" {
+		t.Errorf("expected X-Content-Type-Options 'nosniff', got '%v'", xcto)
+	}
+	if hsts := w.Header().Get("Strict-Transport-Security"); hsts == "" {
+		t.Errorf("expected Strict-Transport-Security header to be set")
+	}
+
+	// Verify CORS header
+	if acao := w.Header().Get("Access-Control-Allow-Origin"); acao != "http://localhost:3000" {
+		t.Errorf("expected Access-Control-Allow-Origin 'http://localhost:3000', got '%v'", acao)
+	}
 }
 
 func TestHealthCheckProbe_NilPool(t *testing.T) {
-	router := setupRouter(nil, nil, zap.NewNop())
+	router := server.NewRouter(nil, nil, nil, zap.NewNop())
 
 	req, _ := http.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -72,5 +90,10 @@ func TestHealthCheckProbe_NilPool(t *testing.T) {
 
 	if resp["status"] != "unhealthy" {
 		t.Errorf("expected status 'unhealthy', got '%v'", resp["status"])
+	}
+
+	// Even on 503 error, security headers must be present
+	if xfo := w.Header().Get("X-Frame-Options"); xfo != "DENY" {
+		t.Errorf("expected X-Frame-Options 'DENY' on error response, got '%v'", xfo)
 	}
 }

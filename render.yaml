@@ -1,0 +1,62 @@
+# ==============================================================================
+# Render Infrastructure Blueprint Specification
+# Docs: https://render.com/docs/blueprint-spec
+# ==============================================================================
+
+services:
+  - type: web
+    name: waap-backend
+    runtime: docker
+    dockerContext: .
+    dockerfilePath: Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: ENV
+        value: production
+
+      - key: PORT
+        value: "8080"
+
+      - key: DATABASE_URL
+        fromDatabase:
+          name: waap-postgres
+          property: connectionString
+
+      - key: JWT_SECRET
+        generateValue: true
+
+      - key: CORS_ALLOWED_ORIGINS
+        value: "*"
+
+      - key: MAX_BODY_SIZE_BYTES
+        value: "2097152"
+
+      - key: RATE_LIMIT_RPS
+        value: "50"
+
+      - key: RATE_LIMIT_BURST
+        value: "100"
+
+      - key: DB_MAX_CONNS
+        value: "20"
+
+      - key: DB_MIN_CONNS
+        value: "2"
+
+      - key: DB_MAX_CONN_LIFETIME
+        value: "1h"
+
+      - key: DB_MAX_CONN_IDLE_TIME
+        value: "30m"
+
+databases:
+  - name: waap-postgres
+    databaseName: waap_db
+    user: postgres
+    plan: free
+    region: oregon
+    postgresMajorVersion: "16"
+
