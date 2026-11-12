@@ -2,7 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, dev, "feat/*", "fix/*" ]
+    branches: [ main, dev, "feat/**", "fix/**" ]
   pull_request:
     branches: [ main, dev ]
   workflow_dispatch:
@@ -20,6 +20,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   GOTOOLCHAIN: auto
 
@@ -30,6 +33,9 @@ jobs:
   detect-changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
     steps:
@@ -40,6 +46,7 @@ jobs:
         id: filter
         uses: dorny/paths-filter@v3
         with:
+          base: ${{ github.ref }}
           filters: |
             backend:
               - 'cmd/**'
@@ -63,6 +70,8 @@ jobs:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -93,6 +102,8 @@ jobs:
     needs: [detect-changes, lint]
     if: ${{ needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     services:
       postgres:
         image: postgres:16-alpine
@@ -194,6 +205,7 @@ jobs:
     needs: [detect-changes, test, package]
     if: ${{ (needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.event_name == 'workflow_dispatch') && github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Trigger Render Deploy Hook
         env:
@@ -202,6 +214,7 @@ jobs:
           PROD_HOOK: ${{ secrets.RENDER_PROD_DEPLOY_HOOK }}
           STAGING_HOOK: ${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}
           DEFAULT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
           TARGET_ENV="production"
           if [ -n "$INPUT_ENV" ]; then
@@ -211,21 +224,36 @@ jobs:
           fi
 
           HOOK_URL=""
-          if [ "$TARGET_ENV" = "staging" ] && [ -n "$STAGING_HOOK" ]; then
+          if [ "$TARGET_ENV" = "staging" ]; then
             HOOK_URL="$STAGING_HOOK"
-          elif [ "$TARGET_ENV" = "production" ] && [ -n "$PROD_HOOK" ]; then
-            HOOK_URL="$PROD_HOOK"
-          else
-            HOOK_URL="$DEFAULT_HOOK"
+          elif [ "$TARGET_ENV" = "production" ]; then
+            if [ -n "$PROD_HOOK" ]; then
+              HOOK_URL="$PROD_HOOK"
+            elif [ -n "$DEFAULT_HOOK" ]; then
+              HOOK_URL="$DEFAULT_HOOK"
+            fi
           fi
 
           if [ -z "$HOOK_URL" ]; then
-            echo "::notice:: No Render Deploy Hook secret configured. To trigger automated deployments, add RENDER_DEPLOY_HOOK or RENDER_PROD_DEPLOY_HOOK to GitHub repository secrets."
+            if [ "$TARGET_ENV" = "staging" ]; then
+              echo "::notice:: No Render staging deploy hook secret configured (RENDER_STAGING_DEPLOY_HOOK). Skipping staging deploy."
+            else
+              echo "::notice:: No Render production deploy hook secret configured (RENDER_PROD_DEPLOY_HOOK or RENDER_DEPLOY_HOOK). Skipping production deploy."
+            fi
             exit 0
           fi
 
-          echo "Triggering Render $TARGET_ENV deployment..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$HOOK_URL")
+          DEPLOY_URL="$HOOK_URL"
+          if [ -n "$COMMIT_SHA" ]; then
+            if [[ "$DEPLOY_URL" == *"?"* ]]; then
+              DEPLOY_URL="${DEPLOY_URL}&ref=${COMMIT_SHA}"
+            else
+              DEPLOY_URL="${DEPLOY_URL}?ref=${COMMIT_SHA}"
+            fi
+          fi
+
+          echo "Triggering Render $TARGET_ENV deployment for commit $COMMIT_SHA..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$DEPLOY_URL")
 
           if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
             echo "Render deployment triggered successfully (HTTP $HTTP_STATUS)"
