@@ -44,6 +44,15 @@ func main() {
 	defer pool.Close()
 	log.Info("Database connection pool established successfully")
 
+	// Apply database schema migrations automatically if enabled
+	if cfg.AutoMigrate {
+		log.Info("Checking and applying database migrations...")
+		if err := db.AutoMigrate(ctx, pool); err != nil {
+			log.Fatal("failed to apply database migrations", zap.Error(err))
+		}
+		log.Info("Database schema verified and loaded successfully")
+	}
+
 	srv := server.New(cfg, pool, db.New(pool), log)
 
 	// Graceful shutdown listener on SIGINT / SIGTERM
