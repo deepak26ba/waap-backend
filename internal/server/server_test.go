@@ -8,10 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
 	"waap-backend/internal/config"
 	"waap-backend/pkg/db"
+	"waap-backend/pkg/response"
 )
 
 func TestServerRouter_HealthCheckSuccess(t *testing.T) {
@@ -83,5 +85,80 @@ func TestServerRouter_HealthCheckNilPool(t *testing.T) {
 
 	if resp["status"] != "unhealthy" {
 		t.Errorf("expected status 'unhealthy', got '%v'", resp["status"])
+	}
+}
+
+func TestServerRouter_PanicRecovery(t *testing.T) {
+	router := NewRouter(nil, nil, nil, zap.NewNop())
+	router.GET("/crash", func(c *gin.Context) {
+		panic("unexpected runtime panic")
+	})
+
+	req, _ := http.NewRequest(http.MethodGet, "/crash", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", w.Code)
+	}
+
+	var env response.Envelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("failed to decode response envelope: %v", err)
+	}
+
+	if env.Success {
+		t.Errorf("expected success to be false")
+	}
+	if env.Error == nil || env.Error.Code != response.ErrCodeInternalServerError {
+		t.Errorf("expected INTERNAL_SERVER_ERROR, got %+v", env.Error)
+	}
+}
+
+func TestServerRouter_NotFoundEnvelope(t *testing.T) {
+	router := NewRouter(nil, nil, nil, zap.NewNop())
+
+	req, _ := http.NewRequest(http.MethodGet, "/non-existent-path", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", w.Code)
+	}
+
+	var env response.Envelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("failed to decode response envelope: %v", err)
+	}
+
+	if env.Success {
+		t.Errorf("expected success false")
+	}
+	if env.Error == nil || env.Error.Code != response.ErrCodeNotFound {
+		t.Errorf("expected NOT_FOUND, got %+v", env.Error)
+	}
+}
+
+func TestServerRouter_MethodNotAllowedEnvelope(t *testing.T) {
+	router := NewRouter(nil, nil, nil, zap.NewNop())
+
+	req, _ := http.NewRequest(http.MethodPost, "/healthz", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status 405, got %d", w.Code)
+	}
+
+	var env response.Envelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("failed to decode response envelope: %v", err)
+	}
+
+	if env.Success {
+		t.Errorf("expected success false")
+	}
+	if env.Error == nil || env.Error.Code != "METHOD_NOT_ALLOWED" {
+		t.Errorf("expected METHOD_NOT_ALLOWED, got %+v", env.Error)
 	}
 }
