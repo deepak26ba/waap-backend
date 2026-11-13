@@ -132,4 +132,24 @@ func TestAuthRouter_RBACProtection(t *testing.T) {
 			t.Errorf("expected success true")
 		}
 	})
+
+	t.Run("Swagger Documentation Route Serves UI", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/swagger/index.html", nil)
+		req.RequestURI = "/swagger/index.html"
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected status 200 for swagger UI, got %d. Body: %s", w.Code, w.Body.String())
+		}
+
+		reqDoc, _ := http.NewRequest(http.MethodGet, "/swagger/doc.json", nil)
+		reqDoc.RequestURI = "/swagger/doc.json"
+		wDoc := httptest.NewRecorder()
+		router.ServeHTTP(wDoc, reqDoc)
+
+		if wDoc.Code != http.StatusOK {
+			t.Fatalf("expected status 200 for swagger doc.json, got %d. Body: %s", wDoc.Code, wDoc.Body.String())
+		}
+	})
 }

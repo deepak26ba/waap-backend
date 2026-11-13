@@ -1,0 +1,419 @@
+basePath: /api/v1
+definitions:
+  cart.CartResponse:
+    properties:
+      id:
+        type: string
+      item_count:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/cart.Item'
+        type: array
+      user_id:
+        type: string
+    type: object
+  cart.Item:
+    properties:
+      cart_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      quantity:
+        type: integer
+      variant_id:
+        type: integer
+    type: object
+  product.CategoryResponse:
+    properties:
+      description:
+        type: string
+      id:
+        type: integer
+      image_url:
+        type: string
+      name:
+        type: string
+      parent_id:
+        type: integer
+      slug:
+        type: string
+    type: object
+  product.ProductResponse:
+    properties:
+      base_price:
+        type: string
+      category_id:
+        type: integer
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: integer
+      slug:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  response.APIError:
+    properties:
+      code:
+        type: string
+      details:
+        items:
+          $ref: '#/definitions/response.FieldError'
+        type: array
+      message:
+        type: string
+    type: object
+  response.Envelope:
+    properties:
+      data: {}
+      error:
+        $ref: '#/definitions/response.APIError'
+      pagination:
+        $ref: '#/definitions/response.Pagination'
+      success:
+        type: boolean
+    type: object
+  response.FieldError:
+    properties:
+      field:
+        type: string
+      message:
+        type: string
+    type: object
+  response.Pagination:
+    properties:
+      page:
+        type: integer
+      per_page:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  user.LoginInput:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+    type: object
+  user.LoginResponse:
+    properties:
+      access_token:
+        type: string
+      expires_at:
+        type: string
+      expires_in:
+        type: integer
+      refresh_token:
+        type: string
+      token_type:
+        type: string
+      user:
+        $ref: '#/definitions/user.UserResponse'
+    type: object
+  user.RefreshInput:
+    properties:
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
+  user.RegisterInput:
+    properties:
+      email:
+        type: string
+      full_name:
+        type: string
+      password:
+        type: string
+      phone_number:
+        type: string
+    type: object
+  user.TokenPair:
+    properties:
+      access_token:
+        type: string
+      expires_at:
+        type: string
+      expires_in:
+        type: integer
+      refresh_token:
+        type: string
+      token_type:
+        type: string
+    type: object
+  user.UserResponse:
+    properties:
+      created_at:
+        type: string
+      email:
+        type: string
+      full_name:
+        type: string
+      id:
+        type: string
+      phone_number:
+        type: string
+      role:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@waap.example.com
+    name: WAAP Engineering Team
+    url: https://waap.example.com/support
+  description: Production-grade RESTful API for WAAP e-commerce backend platform.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: https://waap.example.com/terms
+  title: WAAP E-Commerce Backend API
+  version: "1.0"
+paths:
+  /api/v1/auth/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Credentials Payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/user.LoginInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/user.LoginResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+      summary: Authenticate user and issue JWT token pair
+      tags:
+      - Auth
+  /api/v1/auth/refresh:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Refresh Token Payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/user.RefreshInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/user.TokenPair'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+      summary: Refresh expired access token using refresh token
+      tags:
+      - Auth
+  /api/v1/auth/register:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Registration Payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/user.RegisterInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/user.UserResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+      summary: Register a new customer account
+      tags:
+      - Auth
+  /api/v1/cart:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/cart.CartResponse'
+              type: object
+      summary: Retrieve current shopping cart
+      tags:
+      - Cart
+  /api/v1/categories:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/product.CategoryResponse'
+                  type: array
+              type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+      summary: List all product categories
+      tags:
+      - Catalog
+  /api/v1/products/{id}:
+    get:
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/product.ProductResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+      summary: Get product by ID
+      tags:
+      - Catalog
+securityDefinitions:
+  BearerAuth:
+    description: Enter "Bearer {token}" to authenticate requests.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
