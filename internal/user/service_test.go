@@ -485,6 +485,57 @@ func TestUserService_EmailVerification(t *testing.T) {
 			t.Fatalf("expected retry to succeed with unconsumed OTP, got %v", err)
 		}
 	})
+
+	t.Run("Entering 5 wrong OTPs enforces 30-minute cooling period", func(t *testing.T) {
+		_, err := svc.Register(ctx, RegisterInput{
+			Email:    "cooldown@example.com",
+			Password: "ValidPassword123",
+			FullName: "Cooldown User",
+		})
+		if err != nil {
+			t.Fatalf("failed to register: %v", err)
+		}
+
+		// Submit 4 incorrect OTPs -> rejected with INVALID_OTP (400)
+		for i := 1; i <= 4; i++ {
+			err = svc.VerifyEmail(ctx, "cooldown@example.com", "000000")
+			if err == nil {
+				t.Fatalf("attempt %d: expected error, got nil", i)
+			}
+			var apiErr *response.AppError
+			if !errors.As(err, &apiErr) || apiErr.Code != "INVALID_OTP" {
+				t.Fatalf("attempt %d: expected INVALID_OTP, got %v", i, err)
+			}
+		}
+
+		// 5th attempt -> triggers OTP_COOLING_PERIOD (429)
+		err = svc.VerifyEmail(ctx, "cooldown@example.com", "000000")
+		if err == nil {
+			t.Fatal("5th attempt: expected cooling period error, got nil")
+		}
+		var apiErr *response.AppError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("expected AppError, got %T", err)
+		}
+		if apiErr.StatusCode != 429 {
+			t.Errorf("expected status 429, got %d", apiErr.StatusCode)
+		}
+		if apiErr.Code != "OTP_COOLING_PERIOD" {
+			t.Errorf("expected code OTP_COOLING_PERIOD, got %s", apiErr.Code)
+		}
+
+		// Subsequent verify attempts during cooling period are blocked with 429
+		err = svc.VerifyEmail(ctx, "cooldown@example.com", "123456")
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != 429 {
+			t.Errorf("expected 429 during cooling period, got %v", err)
+		}
+
+		// Resend is also blocked with 429 during cooling period
+		err = svc.ResendVerificationEmail(ctx, "cooldown@example.com")
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != 429 {
+			t.Errorf("expected resend to be blocked with 429 during cooling period, got %v", err)
+		}
+	})
 }
 
 func TestUserService_ResendVerificationEmail(t *testing.T) {

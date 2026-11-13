@@ -177,6 +177,9 @@ func (s *BrevoSender) SendVerificationEmail(ctx context.Context, toEmail, toName
                       <div class="warning-body" style="font-size: 13px; line-height: 1.5; color: #be123c;">
                         Never share this code with anyone under any circumstances. <strong>WAAP staff, customer support, or administrators will NEVER ask for your OTP or password.</strong> Anyone asking for this code is attempting unauthorized access.
                       </div>
+                      <div style="margin-top: 8px; font-size: 12px; line-height: 1.4; color: #9f1239; font-weight: 600;">
+                        ⏱️ 5 incorrect attempts will lock verification for a 30-minute cooling period.
+                      </div>
                     </td>
                   </tr>
                 </table>
