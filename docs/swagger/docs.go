@@ -553,6 +553,9 @@ const docTemplate = `{
         "cart.CartResponse": {
             "type": "object",
             "properties": {
+                "guest_token": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },

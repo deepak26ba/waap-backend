@@ -30,7 +30,7 @@ func RegisterV1(r *gin.Engine, deps Dependencies) {
 	productService := product.NewService(productRepo)
 	productHandler := product.NewHandler(productService, deps.Log)
 
-	cartRepo := cart.NewRepository(deps.Queries)
+	cartRepo := cart.NewRepository(deps.Pool, deps.Queries)
 	cartService := cart.NewService(cartRepo)
 	cartHandler := cart.NewHandler(cartService, deps.Log)
 
@@ -51,8 +51,9 @@ func RegisterV1(r *gin.Engine, deps Dependencies) {
 			catalog.GET("/products/:id", productHandler.GetProduct)
 		}
 
-		// Shopping Cart Routes
+		// Shopping Cart Routes (Optional Authentication)
 		cartGroup := apiV1.Group("/cart")
+		cartGroup.Use(middleware.OptionalAuth(jwtSecret))
 		{
 			cartGroup.GET("", cartHandler.GetCart)
 		}

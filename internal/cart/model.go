@@ -17,8 +17,9 @@ type Item struct {
 
 // CartResponse represents the state of a shopping cart.
 type CartResponse struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    *uuid.UUID `json:"user_id,omitempty"`
-	Items     []Item     `json:"items"`
-	ItemCount int32      `json:"item_count"`
+	ID         uuid.UUID  `json:"id"`
+	UserID     *uuid.UUID `json:"user_id,omitempty"`
+	GuestToken *string    `json:"guest_token,omitempty"`
+	Items      []Item     `json:"items"`
+	ItemCount  int32      `json:"item_count"`
 }

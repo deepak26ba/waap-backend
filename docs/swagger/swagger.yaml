@@ -2,6 +2,8 @@ basePath: /api/v1
 definitions:
   cart.CartResponse:
     properties:
+      guest_token:
+        type: string
       id:
         type: string
       item_count:

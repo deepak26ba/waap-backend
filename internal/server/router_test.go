@@ -152,4 +152,33 @@ func TestAuthRouter_RBACProtection(t *testing.T) {
 			t.Fatalf("expected status 200 for swagger doc.json, got %d. Body: %s", wDoc.Code, wDoc.Body.String())
 		}
 	})
+
+	t.Run("Cart Route with OptionalAuth accepts Bearer token or guest", func(t *testing.T) {
+		// 1. Guest request (no auth)
+		reqGuest, _ := http.NewRequest(http.MethodGet, "/api/v1/cart", nil)
+		wGuest := httptest.NewRecorder()
+		router.ServeHTTP(wGuest, reqGuest)
+		if wGuest.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for guest cart, got %d", wGuest.Code)
+		}
+
+		// 2. Authenticated customer request
+		customerTokens, _ := user.GenerateTokenPair(uuid.Must(uuid.NewV4()), "cust@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
+		reqAuth, _ := http.NewRequest(http.MethodGet, "/api/v1/cart", nil)
+		reqAuth.Header.Set("Authorization", fmt.Sprintf("Bearer %s", customerTokens.AccessToken))
+		wAuth := httptest.NewRecorder()
+		router.ServeHTTP(wAuth, reqAuth)
+		if wAuth.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for authenticated cart, got %d", wAuth.Code)
+		}
+
+		// 3. Invalid token returns 401
+		reqInvalid, _ := http.NewRequest(http.MethodGet, "/api/v1/cart", nil)
+		reqInvalid.Header.Set("Authorization", "Bearer invalid-jwt-token")
+		wInvalid := httptest.NewRecorder()
+		router.ServeHTTP(wInvalid, reqInvalid)
+		if wInvalid.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 Unauthorized for invalid token, got %d", wInvalid.Code)
+		}
+	})
 }
