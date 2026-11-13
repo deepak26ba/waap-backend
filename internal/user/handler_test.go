@@ -1,4 +1,4 @@
-package handler
+package user
 
 import (
 	"bytes"
@@ -11,38 +11,37 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"waap-backend/internal/model"
 	"waap-backend/pkg/response"
 )
 
 type mockAuthService struct {
-	registerFunc     func(ctx context.Context, in model.RegisterInput) (*model.UserResponse, error)
-	loginFunc        func(ctx context.Context, in model.LoginInput) (*model.LoginResponse, error)
-	refreshTokenFunc func(ctx context.Context, refreshToken string) (*model.TokenPair, error)
+	registerFunc     func(ctx context.Context, in RegisterInput) (*UserResponse, error)
+	loginFunc        func(ctx context.Context, in LoginInput) (*LoginResponse, error)
+	refreshTokenFunc func(ctx context.Context, refreshToken string) (*TokenPair, error)
 }
 
-func (m *mockAuthService) Register(ctx context.Context, in model.RegisterInput) (*model.UserResponse, error) {
+func (m *mockAuthService) Register(ctx context.Context, in RegisterInput) (*UserResponse, error) {
 	if m.registerFunc != nil {
 		return m.registerFunc(ctx, in)
 	}
 	return nil, nil
 }
 
-func (m *mockAuthService) Login(ctx context.Context, in model.LoginInput) (*model.LoginResponse, error) {
+func (m *mockAuthService) Login(ctx context.Context, in LoginInput) (*LoginResponse, error) {
 	if m.loginFunc != nil {
 		return m.loginFunc(ctx, in)
 	}
 	return nil, nil
 }
 
-func (m *mockAuthService) RefreshToken(ctx context.Context, refreshToken string) (*model.TokenPair, error) {
+func (m *mockAuthService) RefreshToken(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	if m.refreshTokenFunc != nil {
 		return m.refreshTokenFunc(ctx, refreshToken)
 	}
 	return nil, nil
 }
 
-func setupTestRouter(h *AuthHandler) *gin.Engine {
+func setupTestRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	rg := r.Group("/auth")
@@ -53,8 +52,8 @@ func setupTestRouter(h *AuthHandler) *gin.Engine {
 func TestAuthHandler_Register(t *testing.T) {
 	t.Run("Valid registration returns 201 Created", func(t *testing.T) {
 		svc := &mockAuthService{
-			registerFunc: func(ctx context.Context, in model.RegisterInput) (*model.UserResponse, error) {
-				return &model.UserResponse{
+			registerFunc: func(ctx context.Context, in RegisterInput) (*UserResponse, error) {
+				return &UserResponse{
 					ID:        1,
 					Email:     in.Email,
 					FullName:  in.FullName,
@@ -63,7 +62,7 @@ func TestAuthHandler_Register(t *testing.T) {
 				}, nil
 			},
 		}
-		h := NewAuthHandler(svc, nil)
+		h := NewHandler(svc, nil)
 		r := setupTestRouter(h)
 
 		body := []byte(`{"email":"test@example.com","password":"password123","full_name":"Test User"}`)
@@ -87,7 +86,7 @@ func TestAuthHandler_Register(t *testing.T) {
 	})
 
 	t.Run("Malformed JSON returns 400 Bad Request", func(t *testing.T) {
-		h := NewAuthHandler(&mockAuthService{}, nil)
+		h := NewHandler(&mockAuthService{}, nil)
 		r := setupTestRouter(h)
 
 		req, _ := http.NewRequest(http.MethodPost, "/auth/register", bytes.NewBufferString("{invalid-json"))
@@ -103,13 +102,13 @@ func TestAuthHandler_Register(t *testing.T) {
 
 	t.Run("Service validation error returns 422", func(t *testing.T) {
 		svc := &mockAuthService{
-			registerFunc: func(ctx context.Context, in model.RegisterInput) (*model.UserResponse, error) {
+			registerFunc: func(ctx context.Context, in RegisterInput) (*UserResponse, error) {
 				return nil, response.NewValidationError("validation failed", []response.FieldError{
 					{Field: "email", Message: "invalid email format"},
 				})
 			},
 		}
-		h := NewAuthHandler(svc, nil)
+		h := NewHandler(svc, nil)
 		r := setupTestRouter(h)
 
 		body := []byte(`{"email":"bad","password":"password123","full_name":"Test"}`)
@@ -128,14 +127,14 @@ func TestAuthHandler_Register(t *testing.T) {
 func TestAuthHandler_Login(t *testing.T) {
 	t.Run("Valid credentials returns 200 OK", func(t *testing.T) {
 		svc := &mockAuthService{
-			loginFunc: func(ctx context.Context, in model.LoginInput) (*model.LoginResponse, error) {
-				return &model.LoginResponse{
-					TokenPair: model.TokenPair{
+			loginFunc: func(ctx context.Context, in LoginInput) (*LoginResponse, error) {
+				return &LoginResponse{
+					TokenPair: TokenPair{
 						AccessToken:  "mock-access-token",
 						RefreshToken: "mock-refresh-token",
 						TokenType:    "Bearer",
 					},
-					User: model.UserResponse{
+					User: UserResponse{
 						ID:       1,
 						Email:    in.Email,
 						FullName: "Test User",
@@ -144,7 +143,7 @@ func TestAuthHandler_Login(t *testing.T) {
 				}, nil
 			},
 		}
-		h := NewAuthHandler(svc, nil)
+		h := NewHandler(svc, nil)
 		r := setupTestRouter(h)
 
 		body := []byte(`{"email":"test@example.com","password":"password123"}`)
@@ -161,11 +160,11 @@ func TestAuthHandler_Login(t *testing.T) {
 
 	t.Run("Invalid credentials returns 401 Unauthorized", func(t *testing.T) {
 		svc := &mockAuthService{
-			loginFunc: func(ctx context.Context, in model.LoginInput) (*model.LoginResponse, error) {
+			loginFunc: func(ctx context.Context, in LoginInput) (*LoginResponse, error) {
 				return nil, response.NewUnauthorizedError("invalid email or password")
 			},
 		}
-		h := NewAuthHandler(svc, nil)
+		h := NewHandler(svc, nil)
 		r := setupTestRouter(h)
 
 		body := []byte(`{"email":"test@example.com","password":"wrongpassword"}`)
@@ -184,15 +183,15 @@ func TestAuthHandler_Login(t *testing.T) {
 func TestAuthHandler_Refresh(t *testing.T) {
 	t.Run("Valid refresh token returns 200 OK", func(t *testing.T) {
 		svc := &mockAuthService{
-			refreshTokenFunc: func(ctx context.Context, refreshToken string) (*model.TokenPair, error) {
-				return &model.TokenPair{
+			refreshTokenFunc: func(ctx context.Context, refreshToken string) (*TokenPair, error) {
+				return &TokenPair{
 					AccessToken:  "new-access-token",
 					RefreshToken: "new-refresh-token",
 					TokenType:    "Bearer",
 				}, nil
 			},
 		}
-		h := NewAuthHandler(svc, nil)
+		h := NewHandler(svc, nil)
 		r := setupTestRouter(h)
 
 		body := []byte(`{"refresh_token":"valid-refresh-token"}`)
@@ -208,7 +207,7 @@ func TestAuthHandler_Refresh(t *testing.T) {
 	})
 
 	t.Run("Missing refresh token returns 400 Bad Request", func(t *testing.T) {
-		h := NewAuthHandler(&mockAuthService{}, nil)
+		h := NewHandler(&mockAuthService{}, nil)
 		r := setupTestRouter(h)
 
 		body := []byte(`{}`)

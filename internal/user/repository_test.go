@@ -1,4 +1,4 @@
-package repository
+package user
 
 import (
 	"context"
@@ -63,10 +63,10 @@ func (m *mockDBQuerier) UpdateUser(ctx context.Context, arg db.UpdateUserParams)
 
 func TestUserRepository(t *testing.T) {
 	mock := newMockDBQuerier()
-	repos := NewRepositories(mock)
+	repo := NewRepository(mock)
 	ctx := context.Background()
 
-	created, err := repos.Users.Create(ctx, db.CreateUserParams{
+	created, err := repo.Create(ctx, db.CreateUserParams{
 		Email:        "repo@example.com",
 		PasswordHash: "hashed",
 		FullName:     "Repo User",
@@ -76,7 +76,7 @@ func TestUserRepository(t *testing.T) {
 		t.Fatalf("failed to create user: %v", err)
 	}
 
-	byEmail, err := repos.Users.GetByEmail(ctx, "repo@example.com")
+	byEmail, err := repo.GetByEmail(ctx, "repo@example.com")
 	if err != nil {
 		t.Fatalf("failed to get user by email: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestUserRepository(t *testing.T) {
 		t.Errorf("expected ID %d, got %d", created.ID, byEmail.ID)
 	}
 
-	byID, err := repos.Users.GetByID(ctx, created.ID)
+	byID, err := repo.GetByID(ctx, created.ID)
 	if err != nil {
 		t.Fatalf("failed to get user by ID: %v", err)
 	}

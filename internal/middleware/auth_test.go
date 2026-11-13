@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"waap-backend/internal/service"
+	"waap-backend/internal/user"
 	"waap-backend/pkg/response"
 )
 
@@ -64,7 +64,7 @@ func TestRequireAuth(t *testing.T) {
 	})
 
 	t.Run("Invalid Token Signature Returns 401", func(t *testing.T) {
-		tokens, _ := service.GenerateTokenPair(10, "wrong@test.com", "customer", "another-secret", 15*time.Minute, 1*time.Hour)
+		tokens, _ := user.GenerateTokenPair(10, "wrong@test.com", "customer", "another-secret", 15*time.Minute, 1*time.Hour)
 		r := setupRouter()
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/protected", nil)
@@ -77,7 +77,7 @@ func TestRequireAuth(t *testing.T) {
 	})
 
 	t.Run("Refresh Token Rejected for Resource Auth Returns 401", func(t *testing.T) {
-		tokens, _ := service.GenerateTokenPair(10, "user@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
+		tokens, _ := user.GenerateTokenPair(10, "user@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
 		r := setupRouter()
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/protected", nil)
@@ -90,7 +90,7 @@ func TestRequireAuth(t *testing.T) {
 	})
 
 	t.Run("Valid Access Token Populates Context and Returns 200", func(t *testing.T) {
-		tokens, _ := service.GenerateTokenPair(42, "alice@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
+		tokens, _ := user.GenerateTokenPair(42, "alice@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
 		r := setupRouter()
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/protected", nil)
@@ -137,7 +137,7 @@ func TestRequireRolesAndAdmin(t *testing.T) {
 	}
 
 	t.Run("Customer Cannot Access Admin Route (403 Forbidden)", func(t *testing.T) {
-		tokens, _ := service.GenerateTokenPair(1, "customer@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
+		tokens, _ := user.GenerateTokenPair(1, "customer@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
 		r := setupRouter()
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/admin/metrics", nil)
@@ -156,7 +156,7 @@ func TestRequireRolesAndAdmin(t *testing.T) {
 	})
 
 	t.Run("Admin Can Access Admin Route (200 OK)", func(t *testing.T) {
-		tokens, _ := service.GenerateTokenPair(2, "admin@test.com", "admin", secret, 15*time.Minute, 1*time.Hour)
+		tokens, _ := user.GenerateTokenPair(2, "admin@test.com", "admin", secret, 15*time.Minute, 1*time.Hour)
 		r := setupRouter()
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/admin/metrics", nil)
@@ -169,7 +169,7 @@ func TestRequireRolesAndAdmin(t *testing.T) {
 	})
 
 	t.Run("Manager Can Access Manager Route (200 OK)", func(t *testing.T) {
-		tokens, _ := service.GenerateTokenPair(3, "manager@test.com", "manager", secret, 15*time.Minute, 1*time.Hour)
+		tokens, _ := user.GenerateTokenPair(3, "manager@test.com", "manager", secret, 15*time.Minute, 1*time.Hour)
 		r := setupRouter()
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/manager/reports", nil)
