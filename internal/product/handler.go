@@ -23,12 +23,6 @@ func NewHandler(service Service, log *zap.Logger) *Handler {
 	}
 }
 
-// RegisterRoutes registers catalog endpoints on the provided router group.
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
-	rg.GET("/categories", h.ListCategories)
-	rg.GET("/products/:id", h.GetProduct)
-}
-
 // ListCategories godoc
 // @Summary List all product categories
 // @Tags Catalog

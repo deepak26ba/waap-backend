@@ -22,11 +22,6 @@ func NewHandler(service Service, log *zap.Logger) *Handler {
 	}
 }
 
-// RegisterRoutes registers cart endpoints on the provided router group.
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
-	rg.GET("", h.GetCart)
-}
-
 // GetCart godoc
 // @Summary Retrieve current shopping cart
 // @Tags Cart

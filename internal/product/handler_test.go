@@ -32,7 +32,8 @@ func setupTestRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	rg := r.Group("/catalog")
-	h.RegisterRoutes(rg)
+	rg.GET("/categories", h.ListCategories)
+	rg.GET("/products/:id", h.GetProduct)
 	return r
 }
 
