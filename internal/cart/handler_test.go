@@ -12,7 +12,8 @@ import (
 
 func TestCartHandler_GetCart(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewHandler(&mockCartService{}, nil)
+	tok := "test-guest-token-123"
+	h := NewHandler(&mockCartService{guestToken: &tok}, nil)
 	r := gin.New()
 	r.GET("/cart", h.GetCart)
 
@@ -23,9 +24,15 @@ func TestCartHandler_GetCart(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK, got %d", w.Code)
 	}
+
+	if w.Header().Get("X-Guest-Token") != tok {
+		t.Errorf("expected X-Guest-Token %s, got %s", tok, w.Header().Get("X-Guest-Token"))
+	}
 }
 
-type mockCartService struct{}
+type mockCartService struct {
+	guestToken *string
+}
 
 func (m *mockCartService) CheckAndReserveStock(ctx context.Context, id int64, qty int32) (bool, error) {
 	return true, nil
@@ -33,9 +40,10 @@ func (m *mockCartService) CheckAndReserveStock(ctx context.Context, id int64, qt
 
 func (m *mockCartService) GetCart(ctx context.Context, userID *uuid.UUID, guestToken string) (*CartResponse, error) {
 	return &CartResponse{
-		ID:        uuid.Must(uuid.NewV4()),
-		UserID:    userID,
-		Items:     []Item{},
-		ItemCount: 0,
+		ID:         uuid.Must(uuid.NewV4()),
+		UserID:     userID,
+		GuestToken: m.guestToken,
+		Items:      []Item{},
+		ItemCount:  0,
 	}, nil
 }

@@ -53,5 +53,9 @@ func (h *Handler) GetCart(c *gin.Context) {
 		return
 	}
 
+	if res.GuestToken != nil && *res.GuestToken != "" {
+		c.Header("X-Guest-Token", *res.GuestToken)
+	}
+
 	response.OK(c, res)
 }

@@ -59,6 +59,51 @@ func RequireAuth(jwtSecret string) gin.HandlerFunc {
 	}
 }
 
+// OptionalAuth attempts to authenticate requests carrying a Bearer JWT.
+// If no Authorization header is present, it allows the request to continue anonymously as a guest.
+// If an Authorization header is present but malformed, expired, or invalid, it rejects with 401
+// Unauthorized to prevent silent downgrades and bypasses.
+func OptionalAuth(jwtSecret string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.Next()
+			return
+		}
+
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			response.Unauthorized(c, response.ErrCodeUnauthorized, "authorization header must be in format 'Bearer <token>'")
+			return
+		}
+
+		tokenStr := strings.TrimSpace(parts[1])
+		if tokenStr == "" {
+			response.Unauthorized(c, response.ErrCodeUnauthorized, "token string cannot be empty")
+			return
+		}
+
+		claims, err := user.ValidateToken(tokenStr, jwtSecret)
+		if err != nil {
+			response.Unauthorized(c, response.ErrCodeUnauthorized, "invalid or expired token")
+			return
+		}
+
+		if claims.TokenType != user.TokenTypeAccess {
+			response.Unauthorized(c, response.ErrCodeUnauthorized, "access token required, refresh token is not permitted for authentication")
+			return
+		}
+
+		// Inject authenticated claims into Gin context
+		c.Set(ContextUserID, claims.UserID)
+		c.Set(ContextUserEmail, claims.Email)
+		c.Set(ContextUserRole, claims.Role)
+		c.Set(ContextClaims, claims)
+
+		c.Next()
+	}
+}
+
 // RequireRoles restricts route access to users holding one of the specified roles.
 func RequireRoles(roles ...string) gin.HandlerFunc {
 	allowedRoles := make(map[string]struct{}, len(roles))

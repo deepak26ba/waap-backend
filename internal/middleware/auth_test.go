@@ -188,3 +188,59 @@ func TestRequireRolesAndAdmin(t *testing.T) {
 		}
 	})
 }
+
+func TestOptionalAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	secret := "test-secret-key-12345"
+
+	setupRouter := func() *gin.Engine {
+		r := gin.New()
+		r.Use(OptionalAuth(secret))
+		r.GET("/cart", func(c *gin.Context) {
+			userID, exists := GetUserID(c)
+			if exists {
+				response.OK(c, gin.H{"user_id": userID.String()})
+			} else {
+				response.OK(c, gin.H{"user_id": nil})
+			}
+		})
+		return r
+	}
+
+	t.Run("No token proceeds as guest with 200 OK", func(t *testing.T) {
+		r := setupRouter()
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/cart", nil)
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", w.Code)
+		}
+	})
+
+	t.Run("Valid token sets user_id and returns 200 OK", func(t *testing.T) {
+		testID := uuid.Must(uuid.NewV4())
+		tokens, _ := user.GenerateTokenPair(testID, "user@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
+		r := setupRouter()
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/cart", nil)
+		req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", w.Code)
+		}
+	})
+
+	t.Run("Invalid token returns 401 Unauthorized", func(t *testing.T) {
+		r := setupRouter()
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/cart", nil)
+		req.Header.Set("Authorization", "Bearer invalid-token")
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status 401, got %d", w.Code)
+		}
+	})
+}
