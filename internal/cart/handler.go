@@ -27,6 +27,12 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("", h.GetCart)
 }
 
+// GetCart godoc
+// @Summary Retrieve current shopping cart
+// @Tags Cart
+// @Produce json
+// @Success 200 {object} response.Envelope{data=CartResponse}
+// @Router /api/v1/cart [get]
 func (h *Handler) GetCart(c *gin.Context) {
 	response.OK(c, CartResponse{
 		ID:        uuid.Must(uuid.NewV4()),

@@ -11,8 +11,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/zap"
 
+	_ "waap-backend/docs/swagger"
 	"waap-backend/internal/cart"
 	"waap-backend/internal/middleware"
 	"waap-backend/internal/product"
@@ -67,6 +70,9 @@ func NewRouter(cfg *config.Config, pool *pgxpool.Pool, queries *db.Queries, log 
 }
 
 func registerObservabilityRoutes(r *gin.Engine, pool *pgxpool.Pool, log *zap.Logger) {
+	// Swagger Documentation UI
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
 	r.GET("/healthz", func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 		defer cancel()

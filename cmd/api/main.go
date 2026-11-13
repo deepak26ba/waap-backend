@@ -15,6 +15,26 @@ import (
 	"waap-backend/pkg/logger"
 )
 
+// @title WAAP E-Commerce Backend API
+// @version 1.0
+// @description Production-grade RESTful API for WAAP e-commerce backend platform.
+// @termsOfService https://waap.example.com/terms
+
+// @contact.name WAAP Engineering Team
+// @contact.url https://waap.example.com/support
+// @contact.email support@waap.example.com
+
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+
+// @host localhost:8080
+// @BasePath /api/v1
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Enter "Bearer {token}" to authenticate requests.
+
 func main() {
 	cfg, err := config.LoadConfig()
 	if err != nil {
