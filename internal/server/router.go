@@ -16,7 +16,7 @@ import (
 )
 
 // NewRouter constructs and configures the Gin engine with all global middleware and routes.
-func NewRouter(cfg *config.Config, pool *pgxpool.Pool, queries *db.Queries, log *zap.Logger) *gin.Engine {
+func NewRouter(cfg *config.Config, pool *pgxpool.Pool, queries db.Querier, log *zap.Logger) *gin.Engine {
 	router := gin.New()
 
 	setupMiddleware(router, cfg, log)
