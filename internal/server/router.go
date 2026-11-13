@@ -13,11 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
-	"waap-backend/internal/handler"
+	"waap-backend/internal/cart"
 	"waap-backend/internal/middleware"
-	"waap-backend/internal/model"
-	"waap-backend/internal/repository"
-	"waap-backend/internal/service"
+	"waap-backend/internal/product"
+	"waap-backend/internal/user"
 	"waap-backend/pkg/config"
 	"waap-backend/pkg/db"
 	"waap-backend/pkg/response"
@@ -111,18 +110,36 @@ func registerAPIRoutes(r *gin.Engine, cfg *config.Config, queries *db.Queries, l
 		jwtSecret = "dev-insecure-secret-key-change-in-production-32b"
 	}
 
-	// Wire layered components: Repository -> Service -> Handler
-	repos := repository.NewRepositories(queries)
-	authService := service.NewAuthService(repos.Users, jwtSecret, 15*time.Minute, 7*24*time.Hour)
-	authHandler := handler.NewAuthHandler(authService, log)
+	// 1. User & Auth module wiring
+	userRepo := user.NewRepository(queries)
+	userService := user.NewService(userRepo, jwtSecret, 15*time.Minute, 7*24*time.Hour)
+	userHandler := user.NewHandler(userService, log)
+
+	// 2. Product module wiring
+	productRepo := product.NewRepository(queries)
+	productService := product.NewService(productRepo)
+	productHandler := product.NewHandler(productService, log)
+
+	// 3. Cart module wiring
+	cartRepo := cart.NewRepository(queries)
+	cartService := cart.NewService(cartRepo)
+	cartHandler := cart.NewHandler(cartService, log)
 
 	apiV1 := r.Group("/api/v1")
 	{
-		// 1. Auth routes (public)
+		// Auth routes (public)
 		authGroup := apiV1.Group("/auth")
-		authHandler.RegisterRoutes(authGroup)
+		userHandler.RegisterRoutes(authGroup)
 
-		// 2. Protected customer profile routes
+		// Product & category routes (public)
+		catalogGroup := apiV1.Group("/catalog")
+		productHandler.RegisterRoutes(catalogGroup)
+
+		// Cart routes
+		cartGroup := apiV1.Group("/cart")
+		cartHandler.RegisterRoutes(cartGroup)
+
+		// Protected customer profile routes
 		usersGroup := apiV1.Group("/users")
 		usersGroup.Use(middleware.RequireAuth(jwtSecret))
 		{
@@ -132,7 +149,7 @@ func registerAPIRoutes(r *gin.Engine, cfg *config.Config, queries *db.Queries, l
 					response.Unauthorized(c, response.ErrCodeUnauthorized, "unauthenticated user context")
 					return
 				}
-				user, err := queries.GetUserByID(c.Request.Context(), userID)
+				u, err := queries.GetUserByID(c.Request.Context(), userID)
 				if err != nil {
 					if errors.Is(err, pgx.ErrNoRows) {
 						response.NotFound(c, response.ErrCodeNotFound, "user profile not found")
@@ -142,22 +159,22 @@ func registerAPIRoutes(r *gin.Engine, cfg *config.Config, queries *db.Queries, l
 					return
 				}
 				var phone *string
-				if user.PhoneNumber.Valid {
-					p := user.PhoneNumber.String
+				if u.PhoneNumber.Valid {
+					p := u.PhoneNumber.String
 					phone = &p
 				}
-				response.OK(c, model.UserResponse{
-					ID:          user.ID,
-					Email:       user.Email,
-					FullName:    user.FullName,
-					Role:        user.Role,
+				response.OK(c, user.UserResponse{
+					ID:          u.ID,
+					Email:       u.Email,
+					FullName:    u.FullName,
+					Role:        u.Role,
 					PhoneNumber: phone,
-					CreatedAt:   user.CreatedAt.Time,
+					CreatedAt:   u.CreatedAt.Time,
 				})
 			})
 		}
 
-		// 3. Protected admin routes
+		// Protected admin routes
 		adminGroup := apiV1.Group("/admin")
 		adminGroup.Use(middleware.RequireAuth(jwtSecret), middleware.RequireAdmin())
 		{

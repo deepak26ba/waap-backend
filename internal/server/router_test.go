@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"waap-backend/internal/service"
+	"waap-backend/internal/user"
 	"waap-backend/pkg/config"
 	"waap-backend/pkg/db"
 	"waap-backend/pkg/response"
@@ -97,7 +97,7 @@ func TestAuthRouter_RBACProtection(t *testing.T) {
 	})
 
 	t.Run("Admin Route With Customer Token Returns 403 Forbidden", func(t *testing.T) {
-		customerTokens, _ := service.GenerateTokenPair(10, "cust@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
+		customerTokens, _ := user.GenerateTokenPair(10, "cust@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
 		req, _ := http.NewRequest(http.MethodGet, "/api/v1/admin/ping", nil)
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", customerTokens.AccessToken))
 		w := httptest.NewRecorder()
@@ -115,7 +115,7 @@ func TestAuthRouter_RBACProtection(t *testing.T) {
 	})
 
 	t.Run("Admin Route With Admin Token Returns 200 OK", func(t *testing.T) {
-		adminTokens, _ := service.GenerateTokenPair(1, "admin@test.com", "admin", secret, 15*time.Minute, 1*time.Hour)
+		adminTokens, _ := user.GenerateTokenPair(1, "admin@test.com", "admin", secret, 15*time.Minute, 1*time.Hour)
 		req, _ := http.NewRequest(http.MethodGet, "/api/v1/admin/ping", nil)
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", adminTokens.AccessToken))
 		w := httptest.NewRecorder()

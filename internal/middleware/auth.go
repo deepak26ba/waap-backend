@@ -5,8 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"waap-backend/internal/model"
-	"waap-backend/internal/service"
+	"waap-backend/internal/user"
 	"waap-backend/pkg/response"
 )
 
@@ -38,13 +37,13 @@ func RequireAuth(jwtSecret string) gin.HandlerFunc {
 			return
 		}
 
-		claims, err := service.ValidateToken(tokenStr, jwtSecret)
+		claims, err := user.ValidateToken(tokenStr, jwtSecret)
 		if err != nil {
 			response.Unauthorized(c, response.ErrCodeUnauthorized, "invalid or expired token")
 			return
 		}
 
-		if claims.TokenType != model.TokenTypeAccess {
+		if claims.TokenType != user.TokenTypeAccess {
 			response.Unauthorized(c, response.ErrCodeUnauthorized, "access token required, refresh token is not permitted for authentication")
 			return
 		}
@@ -127,12 +126,12 @@ func GetUserRole(c *gin.Context) (string, bool) {
 }
 
 // GetClaims retrieves the full Claims pointer from the context.
-func GetClaims(c *gin.Context) (*model.Claims, bool) {
+func GetClaims(c *gin.Context) (*user.Claims, bool) {
 	val, exists := c.Get(ContextClaims)
 	if !exists {
 		return nil, false
 	}
 
-	claims, ok := val.(*model.Claims)
+	claims, ok := val.(*user.Claims)
 	return claims, ok
 }
