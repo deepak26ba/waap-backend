@@ -26,3 +26,4 @@ type CategoryResponse struct {
 	Description *string `json:"description,omitempty"`
 	ImageUrl    *string `json:"image_url,omitempty"`
 }
+

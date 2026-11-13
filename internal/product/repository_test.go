@@ -70,3 +70,4 @@ func TestProductRepository(t *testing.T) {
 		t.Errorf("expected 1 category, got %d", len(cats))
 	}
 }
+

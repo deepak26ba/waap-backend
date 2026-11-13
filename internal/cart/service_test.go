@@ -43,3 +43,4 @@ func TestCartService_CheckAndReserveStock(t *testing.T) {
 		t.Errorf("expected stock reservation to fail for excessive quantity")
 	}
 }
+

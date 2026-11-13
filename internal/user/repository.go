@@ -38,3 +38,4 @@ func (r *repository) Create(ctx context.Context, params db.CreateUserParams) (db
 func (r *repository) Update(ctx context.Context, params db.UpdateUserParams) (db.User, error) {
 	return r.queries.UpdateUser(ctx, params)
 }
+

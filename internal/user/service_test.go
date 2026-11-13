@@ -483,3 +483,4 @@ func TestValidateExpiredToken(t *testing.T) {
 		t.Errorf("expected error when validating expired token")
 	}
 }
+

@@ -30,3 +30,4 @@ func (r *repository) DeductStock(ctx context.Context, variantID int64, quantity 
 	}
 	return rows > 0, nil
 }
+

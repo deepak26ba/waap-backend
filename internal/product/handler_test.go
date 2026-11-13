@@ -70,3 +70,4 @@ func TestProductHandler(t *testing.T) {
 		}
 	})
 }
+

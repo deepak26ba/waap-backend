@@ -222,3 +222,4 @@ func TestAuthHandler_Refresh(t *testing.T) {
 		}
 	})
 }
+

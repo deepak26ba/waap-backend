@@ -20,3 +20,4 @@ type CartResponse struct {
 	Items     []Item `json:"items"`
 	ItemCount int32  `json:"item_count"`
 }
+

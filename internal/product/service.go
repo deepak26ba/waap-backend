@@ -79,3 +79,4 @@ func (s *service) ListCategories(ctx context.Context) ([]CategoryResponse, error
 	}
 	return res, nil
 }
+
