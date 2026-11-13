@@ -20,16 +20,17 @@ var (
 )
 
 type otpItem struct {
-	userID    uuid.UUID
+	otpHash   string
 	expiresAt time.Time
 	used      bool
 }
 
-// OTPStore defines the contract for storing and validating verification OTPs in memory.
+// OTPStore defines the contract for storing, validating, and consuming verification OTPs in memory,
+// scoped by user identity to prevent collision between identical OTP codes across accounts.
 type OTPStore interface {
-	Store(otpHash string, userID uuid.UUID, ttl time.Duration)
-	ValidateAndConsume(otpHash string) (uuid.UUID, error)
-	Delete(otpHash string)
+	Store(userID uuid.UUID, otpHash string, ttl time.Duration)
+	Validate(userID uuid.UUID, otpHash string) error
+	Consume(userID uuid.UUID) error
 	DeleteByUserID(userID uuid.UUID)
 	Close()
 }
@@ -37,10 +38,10 @@ type OTPStore interface {
 // TokenStore is an alias for OTPStore.
 type TokenStore = OTPStore
 
-// MemoryOTPStore is a thread-safe in-memory store for verification OTPs that deletes expired entries.
+// MemoryOTPStore is a thread-safe in-memory store for verification OTPs keyed by user ID.
 type MemoryOTPStore struct {
 	mu     sync.RWMutex
-	otps   map[string]otpItem
+	otps   map[uuid.UUID]otpItem
 	stopCh chan struct{}
 }
 
@@ -53,7 +54,7 @@ func NewMemoryOTPStore(cleanupInterval time.Duration) *MemoryOTPStore {
 		cleanupInterval = 1 * time.Minute
 	}
 	s := &MemoryOTPStore{
-		otps:   make(map[string]otpItem),
+		otps:   make(map[uuid.UUID]otpItem),
 		stopCh: make(chan struct{}),
 	}
 
@@ -78,59 +79,63 @@ func NewMemoryTokenStore(cleanupInterval time.Duration) *MemoryOTPStore {
 	return NewMemoryOTPStore(cleanupInterval)
 }
 
-// Store records an OTP hash, associating it with the user ID and expiration duration.
-func (s *MemoryOTPStore) Store(otpHash string, userID uuid.UUID, ttl time.Duration) {
+// Store records an OTP hash for a specific user ID with expiration duration.
+func (s *MemoryOTPStore) Store(userID uuid.UUID, otpHash string, ttl time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.otps[otpHash] = otpItem{
-		userID:    userID,
+	s.otps[userID] = otpItem{
+		otpHash:   otpHash,
 		expiresAt: time.Now().Add(ttl),
 		used:      false,
 	}
 }
 
-// ValidateAndConsume validates the OTP, marks it consumed to prevent reuse, and purges if expired.
-func (s *MemoryOTPStore) ValidateAndConsume(otpHash string) (uuid.UUID, error) {
+// Validate checks if the user has an active, unconsumed OTP matching the provided hash without consuming it.
+func (s *MemoryOTPStore) Validate(userID uuid.UUID, otpHash string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	item, exists := s.otps[otpHash]
+	item, exists := s.otps[userID]
 	if !exists {
-		return uuid.Nil, ErrOTPNotFound
+		return ErrOTPNotFound
 	}
 
 	if item.used {
-		return uuid.Nil, ErrOTPAlreadyUsed
+		return ErrOTPAlreadyUsed
 	}
 
 	if time.Now().After(item.expiresAt) {
-		delete(s.otps, otpHash)
-		return uuid.Nil, ErrOTPExpired
+		delete(s.otps, userID)
+		return ErrOTPExpired
 	}
 
-	// Mark as consumed to enforce single-use
-	item.used = true
-	s.otps[otpHash] = item
+	if item.otpHash != otpHash {
+		return ErrOTPNotFound
+	}
 
-	return item.userID, nil
+	return nil
 }
 
-// Delete removes an OTP from memory immediately.
-func (s *MemoryOTPStore) Delete(otpHash string) {
+// Consume marks the user's OTP as consumed, enforcing single-use.
+func (s *MemoryOTPStore) Consume(userID uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.otps, otpHash)
+
+	item, exists := s.otps[userID]
+	if !exists {
+		return ErrOTPNotFound
+	}
+
+	item.used = true
+	s.otps[userID] = item
+	return nil
 }
 
-// DeleteByUserID purges all OTPs associated with a given user ID.
+// DeleteByUserID purges the active OTP associated with a given user ID.
 func (s *MemoryOTPStore) DeleteByUserID(userID uuid.UUID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for k, v := range s.otps {
-		if v.userID == userID {
-			delete(s.otps, k)
-		}
-	}
+	delete(s.otps, userID)
 }
 
 // cleanupExpired removes all OTPs whose expiration timestamp has passed.

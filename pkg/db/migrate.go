@@ -25,32 +25,8 @@ func AutoMigrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("failed to initialize schema_migrations table: %w", err)
 	}
 
-	// Detect legacy schema incompatibility: if users.id is bigint instead of uuid,
-	// reset legacy tables so 000001_init_schema can reapply the canonical UUID schema.
-	var idDataType string
-	_ = pool.QueryRow(ctx, `
-		SELECT data_type FROM information_schema.columns 
-		WHERE table_name = 'users' AND column_name = 'id'
-	`).Scan(&idDataType)
-
-	if idDataType == "bigint" {
-		downCandidates := []string{
-			"sql/migrations/000001_init_schema.down.sql",
-			"/app/sql/migrations/000001_init_schema.down.sql",
-			"../sql/migrations/000001_init_schema.down.sql",
-			"../../sql/migrations/000001_init_schema.down.sql",
-		}
-		for _, p := range downCandidates {
-			if ddl, readErr := os.ReadFile(p); readErr == nil {
-				_, _ = pool.Exec(ctx, string(ddl))
-				_, _ = pool.Exec(ctx, "DELETE FROM schema_migrations WHERE version = '000001_init_schema'")
-				break
-			}
-		}
-	}
-
 	// Ensure email_verified column exists if users table was already created by an earlier run
-	_, _ = pool.Exec(ctx, `
+	if _, err := pool.Exec(ctx, `
 		DO $$
 		BEGIN
 			IF EXISTS (
@@ -59,7 +35,9 @@ func AutoMigrate(ctx context.Context, pool *pgxpool.Pool) error {
 				ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
 			END IF;
 		END $$;
-	`)
+	`); err != nil {
+		return fmt.Errorf("failed to ensure email_verified column: %w", err)
+	}
 
 	migrations := []struct {
 		version string

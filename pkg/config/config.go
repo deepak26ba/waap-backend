@@ -97,6 +97,10 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("security configuration error: JWT_SECRET in production must be at least 32 characters long")
 	}
 
+	if env == "production" && brevoAPIKey == "" {
+		return nil, fmt.Errorf("configuration error: BREVO_API_KEY environment variable is required in production")
+	}
+
 	cfg := &Config{
 		Port:                 getEnv("PORT", "8080"),
 		Env:                  env,

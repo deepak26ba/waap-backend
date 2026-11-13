@@ -7,85 +7,71 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
-func TestMemoryTokenStore(t *testing.T) {
-	store := NewMemoryTokenStore(100 * time.Millisecond)
+func TestMemoryOTPStore(t *testing.T) {
+	store := NewMemoryOTPStore(100 * time.Millisecond)
 	defer store.Close()
 
-	uID := uuid.Must(uuid.NewV4())
-	tokHash := "test-hash-123"
+	uID1 := uuid.Must(uuid.NewV4())
+	uID2 := uuid.Must(uuid.NewV4())
+	sharedOTP := "shared-otp-hash"
 
-	// 1. Store and consume
-	store.Store(tokHash, uID, 1*time.Minute)
+	// 1. Two users with identical OTP hash do NOT overwrite each other
+	store.Store(uID1, sharedOTP, 1*time.Minute)
+	store.Store(uID2, sharedOTP, 1*time.Minute)
 
-	gotID, err := store.ValidateAndConsume(tokHash)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := store.Validate(uID1, sharedOTP); err != nil {
+		t.Fatalf("expected valid OTP for user 1, got %v", err)
 	}
-	if gotID != uID {
-		t.Fatalf("expected user ID %s, got %s", uID, gotID)
-	}
-
-	// 2. Token reuse
-	_, err = store.ValidateAndConsume(tokHash)
-	if err != ErrTokenAlreadyUsed {
-		t.Fatalf("expected ErrTokenAlreadyUsed, got %v", err)
+	if err := store.Validate(uID2, sharedOTP); err != nil {
+		t.Fatalf("expected valid OTP for user 2, got %v", err)
 	}
 
-	// 3. Unknown token
-	_, err = store.ValidateAndConsume("non-existent-hash")
-	if err != ErrTokenNotFound {
-		t.Fatalf("expected ErrTokenNotFound, got %v", err)
+	// 2. Consume user 1 only; user 2 remains unaffected
+	if err := store.Consume(uID1); err != nil {
+		t.Fatalf("unexpected error consuming user 1 OTP: %v", err)
+	}
+	if err := store.Validate(uID1, sharedOTP); err != ErrOTPAlreadyUsed {
+		t.Fatalf("expected ErrOTPAlreadyUsed for user 1, got %v", err)
+	}
+	if err := store.Validate(uID2, sharedOTP); err != nil {
+		t.Fatalf("expected user 2 OTP to remain valid, got %v", err)
 	}
 
-	// 4. Expired token upon access
-	expiredHash := "expired-hash-456"
-	store.Store(expiredHash, uID, -1*time.Second)
-
-	_, err = store.ValidateAndConsume(expiredHash)
-	if err != ErrTokenExpired {
-		t.Fatalf("expected ErrTokenExpired, got %v", err)
+	// 3. Unknown hash or unknown user
+	if err := store.Validate(uID2, "wrong-hash"); err != ErrOTPNotFound {
+		t.Fatalf("expected ErrOTPNotFound for wrong hash, got %v", err)
+	}
+	unknownUser := uuid.Must(uuid.NewV4())
+	if err := store.Validate(unknownUser, sharedOTP); err != ErrOTPNotFound {
+		t.Fatalf("expected ErrOTPNotFound for unknown user, got %v", err)
 	}
 
-	// Confirm it was deleted on access
-	_, err = store.ValidateAndConsume(expiredHash)
-	if err != ErrTokenNotFound {
-		t.Fatalf("expected ErrTokenNotFound after expired token purged, got %v", err)
+	// 4. Expired OTP
+	expiredUser := uuid.Must(uuid.NewV4())
+	store.Store(expiredUser, "exp-hash", -1*time.Second)
+	if err := store.Validate(expiredUser, "exp-hash"); err != ErrOTPExpired {
+		t.Fatalf("expected ErrOTPExpired, got %v", err)
+	}
+	// Once checked, it was purged
+	if err := store.Validate(expiredUser, "exp-hash"); err != ErrOTPNotFound {
+		t.Fatalf("expected ErrOTPNotFound after purge, got %v", err)
 	}
 
-	// 5. Automatic background cleanup
-	cleanupHash := "cleanup-hash-789"
-	store.Store(cleanupHash, uID, 50*time.Millisecond)
+	// 5. DeleteByUserID
+	store.DeleteByUserID(uID2)
+	if err := store.Validate(uID2, sharedOTP); err != ErrOTPNotFound {
+		t.Fatalf("expected ErrOTPNotFound after DeleteByUserID, got %v", err)
+	}
 
+	// 6. Automatic background cleanup
+	cleanupUser := uuid.Must(uuid.NewV4())
+	store.Store(cleanupUser, "cleanup-hash", 50*time.Millisecond)
 	time.Sleep(150 * time.Millisecond)
 
 	store.mu.RLock()
-	_, exists := store.otps[cleanupHash]
+	_, exists := store.otps[cleanupUser]
 	store.mu.RUnlock()
-
 	if exists {
-		t.Error("expected expired token to be cleaned up from memory by background cleaner")
-	}
-
-	// 6. Manual delete
-	delHash := "delete-hash"
-	store.Store(delHash, uID, 1*time.Minute)
-	store.Delete(delHash)
-	_, err = store.ValidateAndConsume(delHash)
-	if err != ErrTokenNotFound {
-		t.Fatalf("expected ErrTokenNotFound after manual delete, got %v", err)
-	}
-
-	// 7. DeleteByUserID
-	userTok1 := "user-tok-1"
-	userTok2 := "user-tok-2"
-	store.Store(userTok1, uID, 1*time.Minute)
-	store.Store(userTok2, uID, 1*time.Minute)
-	store.DeleteByUserID(uID)
-
-	if _, err := store.ValidateAndConsume(userTok1); err != ErrTokenNotFound {
-		t.Errorf("expected ErrTokenNotFound for userTok1, got %v", err)
-	}
-	if _, err := store.ValidateAndConsume(userTok2); err != ErrTokenNotFound {
-		t.Errorf("expected ErrTokenNotFound for userTok2, got %v", err)
+		t.Error("expected expired OTP to be cleaned up from memory by background cleaner")
 	}
 }

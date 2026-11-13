@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -74,5 +75,29 @@ func TestNoopSender(t *testing.T) {
 	err := sender.SendVerificationEmail(context.Background(), "user@example.com", "Test User", "tok")
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestBrevoSender_EscapesHTMLInName(t *testing.T) {
+	var receivedPayload brevoEmailPayload
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&receivedPayload)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"messageId": "<test@brevo.com>"}`))
+	}))
+	defer server.Close()
+
+	sender := NewBrevoSender("test-api-key", "noreply@example.com", "TestApp")
+	sender.SetBaseURL(server.URL)
+
+	err := sender.SendVerificationEmail(context.Background(), "user@example.com", "<script>alert(1)</script>", "123456")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(receivedPayload.HTMLContent, "<script>") {
+		t.Errorf("expected HTML markup to be escaped in email body")
+	}
+	if !strings.Contains(receivedPayload.HTMLContent, "&lt;script&gt;") {
+		t.Errorf("expected escaped HTML &lt;script&gt; in email body")
 	}
 }

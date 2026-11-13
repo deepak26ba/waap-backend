@@ -178,7 +178,7 @@ func (s *service) Register(ctx context.Context, in RegisterInput) (*RegisterResp
 		s.log.Error("failed to generate email verification otp", zap.Error(err), zap.String("user_id", u.ID.String()))
 	} else {
 		// Store in memory with 5-minute expiration TTL
-		s.tokenStore.Store(otpHash, u.ID, s.verificationTokenTTL)
+		s.tokenStore.Store(u.ID, otpHash, s.verificationTokenTTL)
 
 		// 6. Deliver verification email via Brevo
 		// Sensitive OTP is passed to email transport, NEVER logged in application logs
@@ -318,10 +318,19 @@ func (s *service) VerifyEmail(ctx context.Context, rawEmail, rawOTP string) erro
 	}
 	emailAddr := strings.ToLower(parsedAddr.Address)
 
-	otpHash := hashOTP(rawOTP)
-
-	otpUserID, err := s.tokenStore.ValidateAndConsume(otpHash)
+	// 1. Resolve submitted email to user identity
+	u, err := s.repo.GetByEmail(ctx, emailAddr)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return response.NewBadRequestError("INVALID_OTP", "invalid or expired verification otp")
+		}
+		s.log.Error("failed to find user by email during verification", zap.Error(err), zap.String("email", emailAddr))
+		return response.NewInternalError(errors.New("failed to verify email"))
+	}
+
+	// 2. Validate user's OTP before consuming it
+	otpHash := hashOTP(rawOTP)
+	if err := s.tokenStore.Validate(u.ID, otpHash); err != nil {
 		switch {
 		case errors.Is(err, ErrTokenNotFound), errors.Is(err, ErrOTPNotFound):
 			return response.NewBadRequestError("INVALID_OTP", "invalid or expired verification otp")
@@ -334,26 +343,14 @@ func (s *service) VerifyEmail(ctx context.Context, rawEmail, rawOTP string) erro
 		}
 	}
 
-	// Verify that the OTP corresponds to the submitted email
-	u, err := s.repo.GetByID(ctx, otpUserID)
-	if err != nil {
-		s.log.Error("failed to find user by otp user_id", zap.Error(err), zap.String("user_id", otpUserID.String()))
-		return response.NewBadRequestError("INVALID_OTP", "invalid verification otp")
-	}
-
-	if strings.ToLower(u.Email) != emailAddr {
-		s.log.Warn("verification otp email mismatch",
-			zap.String("otp_user_id", otpUserID.String()),
-			zap.String("otp_email", u.Email),
-			zap.String("provided_email", emailAddr),
-		)
-		return response.NewBadRequestError("INVALID_OTP", "verification otp does not match the provided email address")
-	}
-
+	// 3. Mark user verified in database
 	if _, err := s.repo.MarkUserEmailVerified(ctx, u.ID); err != nil {
 		s.log.Error("failed to mark email as verified", zap.Error(err), zap.String("user_id", u.ID.String()))
 		return response.NewInternalError(errors.New("failed to verify email"))
 	}
+
+	// 4. Consume OTP only after successful DB persistence
+	_ = s.tokenStore.Consume(u.ID)
 
 	s.log.Info("email verified successfully", zap.String("user_id", u.ID.String()))
 	return nil
@@ -387,7 +384,9 @@ func (s *service) ResendVerificationEmail(ctx context.Context, rawEmail string) 
 	}
 
 	if u.EmailVerified {
-		return response.NewBadRequestError("EMAIL_ALREADY_VERIFIED", "this email address is already verified")
+		// Anti-enumeration: return the same success response as other accounts
+		s.log.Info("verification resend skipped for verified email", zap.String("user_id", u.ID.String()))
+		return nil
 	}
 
 	// Invalidate any older pending OTPs for this user
@@ -400,10 +399,11 @@ func (s *service) ResendVerificationEmail(ctx context.Context, rawEmail string) 
 		return response.NewInternalError(errors.New("failed to generate verification otp"))
 	}
 
-	s.tokenStore.Store(otpHash, u.ID, s.verificationTokenTTL)
+	s.tokenStore.Store(u.ID, otpHash, s.verificationTokenTTL)
 
 	if err := s.mailer.SendVerificationEmail(ctx, u.Email, u.FullName, rawOTP); err != nil {
 		s.log.Error("failed to dispatch verification email", zap.Error(err), zap.String("user_id", u.ID.String()))
+		return response.NewInternalError(errors.New("failed to send verification email"))
 	}
 
 	s.log.Info("verification email resent", zap.String("user_id", u.ID.String()))
