@@ -137,12 +137,14 @@ func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse
 	if err == nil {
 		return nil, response.NewConflictError("EMAIL_ALREADY_EXISTS", "a user with this email address already exists")
 	} else if !errors.Is(err, pgx.ErrNoRows) {
+		s.log.Error("failed to check existing user by email", zap.Error(err), zap.String("email", emailAddr))
 		return nil, response.NewInternalError(errors.New("failed to check existing user"))
 	}
 
 	// 3. Hash password using Bcrypt with cost 12
 	hashedPassword, err := HashPassword(in.Password)
 	if err != nil {
+		s.log.Error("failed to hash user password", zap.Error(err))
 		return nil, response.NewInternalError(errors.New("failed to process credentials"))
 	}
 
@@ -164,6 +166,7 @@ func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return nil, response.NewConflictError("EMAIL_ALREADY_EXISTS", "a user with this email address already exists")
 		}
+		s.log.Error("failed to create user in database", zap.Error(err), zap.String("email", emailAddr))
 		return nil, response.NewInternalError(errors.New("failed to register user"))
 	}
 
