@@ -92,3 +92,4 @@ func TestUserRepository(t *testing.T) {
 		t.Errorf("expected email repo@example.com, got %s", byID.Email)
 	}
 }
+
