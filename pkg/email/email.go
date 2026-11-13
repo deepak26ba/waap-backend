@@ -141,3 +141,4 @@ type NoopSender struct{}
 func (n *NoopSender) SendVerificationEmail(ctx context.Context, toEmail, toName, token string) error {
 	return nil
 }
+
