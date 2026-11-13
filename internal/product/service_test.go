@@ -28,11 +28,15 @@ func (m *mockRepo) ListCategories(ctx context.Context) ([]db.Category, error) {
 }
 
 func TestProductService(t *testing.T) {
+	var price pgtype.Numeric
+	_ = price.Scan("99.95")
+
 	mock := &mockRepo{
 		product: db.Product{
 			ID:        10,
 			Title:     "Sample Shoes",
 			Slug:      "sample-shoes",
+			BasePrice: price,
 			Status:    "ACTIVE",
 			CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 			UpdatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
@@ -51,6 +55,9 @@ func TestProductService(t *testing.T) {
 	}
 	if p.Title != "Sample Shoes" {
 		t.Errorf("expected Title Sample Shoes, got %s", p.Title)
+	}
+	if p.BasePrice != "99.95" {
+		t.Errorf("expected BasePrice 99.95, got %s", p.BasePrice)
 	}
 
 	cats, err := svc.ListCategories(ctx)

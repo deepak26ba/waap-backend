@@ -183,7 +183,7 @@ info:
   title: WAAP E-Commerce Backend API
   version: "1.0"
 paths:
-  /api/v1/auth/login:
+  /auth/login:
     post:
       consumes:
       - application/json
@@ -227,7 +227,7 @@ paths:
       summary: Authenticate user and issue JWT token pair
       tags:
       - Auth
-  /api/v1/auth/refresh:
+  /auth/refresh:
     post:
       consumes:
       - application/json
@@ -271,7 +271,7 @@ paths:
       summary: Refresh expired access token using refresh token
       tags:
       - Auth
-  /api/v1/auth/register:
+  /auth/register:
     post:
       consumes:
       - application/json
@@ -324,8 +324,17 @@ paths:
       summary: Register a new customer account
       tags:
       - Auth
-  /api/v1/cart:
+  /cart:
     get:
+      parameters:
+      - description: Guest Cart Token
+        in: header
+        name: X-Guest-Token
+        type: string
+      - description: Guest Cart Token Query Parameter
+        in: query
+        name: guest_token
+        type: string
       produces:
       - application/json
       responses:
@@ -338,10 +347,19 @@ paths:
                 data:
                   $ref: '#/definitions/cart.CartResponse'
               type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
       summary: Retrieve current shopping cart
       tags:
       - Cart
-  /api/v1/categories:
+  /catalog/categories:
     get:
       produces:
       - application/json
@@ -369,7 +387,7 @@ paths:
       summary: List all product categories
       tags:
       - Catalog
-  /api/v1/products/{id}:
+  /catalog/products/{id}:
     get:
       parameters:
       - description: Product ID
@@ -410,7 +428,7 @@ paths:
       summary: Get product by ID
       tags:
       - Catalog
-  /api/v1/users/me:
+  /users/me:
     get:
       produces:
       - application/json

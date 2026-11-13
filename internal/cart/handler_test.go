@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gofrs/uuid/v5"
 )
 
 func TestCartHandler_GetCart(t *testing.T) {
@@ -28,4 +29,13 @@ type mockCartService struct{}
 
 func (m *mockCartService) CheckAndReserveStock(ctx context.Context, id int64, qty int32) (bool, error) {
 	return true, nil
+}
+
+func (m *mockCartService) GetCart(ctx context.Context, userID *uuid.UUID, guestToken string) (*CartResponse, error) {
+	return &CartResponse{
+		ID:        uuid.Must(uuid.NewV4()),
+		UserID:    userID,
+		Items:     []Item{},
+		ItemCount: 0,
+	}, nil
 }

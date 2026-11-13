@@ -32,7 +32,7 @@ func NewHandler(service Service, log *zap.Logger) *Handler {
 // @Failure 400 {object} response.Envelope{error=response.APIError}
 // @Failure 409 {object} response.Envelope{error=response.APIError}
 // @Failure 422 {object} response.Envelope{error=response.APIError}
-// @Router /api/v1/auth/register [post]
+// @Router /auth/register [post]
 func (h *Handler) Register(c *gin.Context) {
 	var in RegisterInput
 	if err := c.ShouldBindJSON(&in); err != nil {
@@ -58,7 +58,7 @@ func (h *Handler) Register(c *gin.Context) {
 // @Success 200 {object} response.Envelope{data=LoginResponse}
 // @Failure 400 {object} response.Envelope{error=response.APIError}
 // @Failure 401 {object} response.Envelope{error=response.APIError}
-// @Router /api/v1/auth/login [post]
+// @Router /auth/login [post]
 func (h *Handler) Login(c *gin.Context) {
 	var in LoginInput
 	if err := c.ShouldBindJSON(&in); err != nil {
@@ -84,7 +84,7 @@ func (h *Handler) Login(c *gin.Context) {
 // @Success 200 {object} response.Envelope{data=TokenPair}
 // @Failure 400 {object} response.Envelope{error=response.APIError}
 // @Failure 401 {object} response.Envelope{error=response.APIError}
-// @Router /api/v1/auth/refresh [post]
+// @Router /auth/refresh [post]
 func (h *Handler) Refresh(c *gin.Context) {
 	var in RefreshInput
 	if err := c.ShouldBindJSON(&in); err != nil {
@@ -109,7 +109,7 @@ func (h *Handler) Refresh(c *gin.Context) {
 // @Success 200 {object} response.Envelope{data=UserResponse}
 // @Failure 401 {object} response.Envelope{error=response.APIError}
 // @Failure 404 {object} response.Envelope{error=response.APIError}
-// @Router /api/v1/users/me [get]
+// @Router /users/me [get]
 func (h *Handler) GetProfile(c *gin.Context) {
 	val, exists := c.Get(ContextUserID)
 	if !exists {

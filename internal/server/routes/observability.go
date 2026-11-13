@@ -32,7 +32,7 @@ func RegisterObservability(r *gin.Engine, pool *pgxpool.Pool, log *zap.Logger) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"status":   "unhealthy",
 				"database": "disconnected",
-				"error":    err.Error(),
+				"error":    "database service unavailable",
 			})
 			return
 		}

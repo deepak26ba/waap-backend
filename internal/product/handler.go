@@ -29,7 +29,7 @@ func NewHandler(service Service, log *zap.Logger) *Handler {
 // @Produce json
 // @Success 200 {object} response.Envelope{data=[]CategoryResponse}
 // @Failure 500 {object} response.Envelope{error=response.APIError}
-// @Router /api/v1/categories [get]
+// @Router /catalog/categories [get]
 func (h *Handler) ListCategories(c *gin.Context) {
 	cats, err := h.service.ListCategories(c.Request.Context())
 	if err != nil {
@@ -47,7 +47,7 @@ func (h *Handler) ListCategories(c *gin.Context) {
 // @Success 200 {object} response.Envelope{data=ProductResponse}
 // @Failure 400 {object} response.Envelope{error=response.APIError}
 // @Failure 404 {object} response.Envelope{error=response.APIError}
-// @Router /api/v1/products/{id} [get]
+// @Router /catalog/products/{id} [get]
 func (h *Handler) GetProduct(c *gin.Context) {
 	idParam := c.Param("id")
 	id, err := strconv.ParseInt(idParam, 10, 64)

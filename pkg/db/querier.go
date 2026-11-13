@@ -8,13 +8,18 @@ import (
 	"context"
 
 	uuid "github.com/gofrs/uuid/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
 	CheckHealth(ctx context.Context) (int32, error)
+	CreateCart(ctx context.Context, arg CreateCartParams) (Cart, error)
 	CreateCategory(ctx context.Context, arg CreateCategoryParams) (Category, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeductStockForCheckout(ctx context.Context, arg DeductStockForCheckoutParams) (int64, error)
+	GetCartByGuestToken(ctx context.Context, guestToken pgtype.Text) (Cart, error)
+	GetCartByUserID(ctx context.Context, userID pgtype.UUID) (Cart, error)
+	GetCartItems(ctx context.Context, cartID uuid.UUID) ([]CartItem, error)
 	GetCategoryByID(ctx context.Context, id int64) (Category, error)
 	GetCategoryBySlug(ctx context.Context, slug string) (Category, error)
 	GetProductByID(ctx context.Context, id int64) (Product, error)
