@@ -410,6 +410,43 @@ paths:
       summary: Get product by ID
       tags:
       - Catalog
+  /api/v1/users/me:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/user.UserResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get current user profile
+      tags:
+      - Users
 securityDefinitions:
   BearerAuth:
     description: Enter "Bearer {token}" to authenticate requests.

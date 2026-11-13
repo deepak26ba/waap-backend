@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	ContextUserID    = "user_id"
-	ContextUserEmail = "user_email"
-	ContextUserRole  = "user_role"
-	ContextClaims    = "claims"
+	ContextUserID    = user.ContextUserID
+	ContextUserEmail = user.ContextUserEmail
+	ContextUserRole  = user.ContextUserRole
+	ContextClaims    = user.ContextClaims
 )
 
 // RequireAuth authenticates incoming requests using a Bearer JWT access token.

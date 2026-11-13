@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/mail"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ type Service interface {
 	Register(ctx context.Context, in RegisterInput) (*UserResponse, error)
 	Login(ctx context.Context, in LoginInput) (*LoginResponse, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*TokenPair, error)
+	GetProfile(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
 }
 
 type service struct {
@@ -330,4 +332,30 @@ func ValidateToken(tokenString, secret string) (*Claims, error) {
 	}
 
 	return claims, nil
+}
+
+// GetProfile retrieves a user's profile by their unique ID.
+func (s *service) GetProfile(ctx context.Context, userID uuid.UUID) (*UserResponse, error) {
+	u, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, response.NewNotFoundError("user profile not found")
+		}
+		return nil, response.NewAppError(http.StatusInternalServerError, response.ErrCodeInternalServerError, "failed to retrieve user profile")
+	}
+
+	var phone *string
+	if u.PhoneNumber.Valid {
+		p := u.PhoneNumber.String
+		phone = &p
+	}
+
+	return &UserResponse{
+		ID:          u.ID,
+		Email:       u.Email,
+		FullName:    u.FullName,
+		Role:        u.Role,
+		PhoneNumber: phone,
+		CreatedAt:   u.CreatedAt.Time,
+	}, nil
 }

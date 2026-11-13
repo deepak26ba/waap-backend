@@ -11,6 +11,11 @@ import (
 const (
 	TokenTypeAccess  = "access"
 	TokenTypeRefresh = "refresh"
+
+	ContextUserID    = "user_id"
+	ContextUserEmail = "user_email"
+	ContextUserRole  = "user_role"
+	ContextClaims    = "claims"
 )
 
 // ErrInvalidToken indicates the token is malformed, expired, or failed signature check.
