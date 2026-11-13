@@ -24,7 +24,7 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/api/v1/auth/login": {
+        "/auth/login": {
             "post": {
                 "consumes": [
                     "application/json"
@@ -105,7 +105,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/auth/refresh": {
+        "/auth/refresh": {
             "post": {
                 "consumes": [
                     "application/json"
@@ -186,7 +186,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/auth/register": {
+        "/auth/register": {
             "post": {
                 "consumes": [
                     "application/json"
@@ -285,7 +285,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/cart": {
+        "/cart": {
             "get": {
                 "produces": [
                     "application/json"
@@ -294,6 +294,20 @@ const docTemplate = `{
                     "Cart"
                 ],
                 "summary": "Retrieve current shopping cart",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Guest Cart Token",
+                        "name": "X-Guest-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Guest Cart Token Query Parameter",
+                        "name": "guest_token",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -312,11 +326,29 @@ const docTemplate = `{
                                 }
                             ]
                         }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
                     }
                 }
             }
         },
-        "/api/v1/categories": {
+        "/catalog/categories": {
             "get": {
                 "produces": [
                     "application/json"
@@ -368,7 +400,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/products/{id}": {
+        "/catalog/products/{id}": {
             "get": {
                 "produces": [
                     "application/json"
@@ -444,7 +476,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/users/me": {
+        "/users/me": {
             "get": {
                 "security": [
                     {

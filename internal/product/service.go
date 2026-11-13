@@ -3,8 +3,10 @@ package product
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"waap-backend/pkg/response"
 )
@@ -39,10 +41,25 @@ func (s *service) GetProductByID(ctx context.Context, id int64) (*ProductRespons
 		Title:       p.Title,
 		Slug:        p.Slug,
 		Description: p.Description,
+		BasePrice:   formatNumeric(p.BasePrice),
 		Status:      p.Status,
 		CreatedAt:   p.CreatedAt.Time,
 		UpdatedAt:   p.UpdatedAt.Time,
 	}, nil
+}
+
+func formatNumeric(n pgtype.Numeric) string {
+	if !n.Valid {
+		return "0.00"
+	}
+	val, err := n.Value()
+	if err != nil || val == nil {
+		return "0.00"
+	}
+	if s, ok := val.(string); ok {
+		return s
+	}
+	return fmt.Sprint(val)
 }
 
 func (s *service) ListCategories(ctx context.Context) ([]CategoryResponse, error) {
