@@ -530,10 +530,14 @@ func TestUserService_EmailVerification(t *testing.T) {
 			t.Errorf("expected 429 during cooling period, got %v", err)
 		}
 
-		// Resend is also blocked with 429 during cooling period
+		// Resend returns nil during cooling period (anti-enumeration) and suppresses email dispatch
+		emailCountBefore := len(mailer.sentEmails)
 		err = svc.ResendVerificationEmail(ctx, "cooldown@example.com")
-		if !errors.As(err, &apiErr) || apiErr.StatusCode != 429 {
-			t.Errorf("expected resend to be blocked with 429 during cooling period, got %v", err)
+		if err != nil {
+			t.Errorf("expected resend to return nil during cooling period, got %v", err)
+		}
+		if len(mailer.sentEmails) != emailCountBefore {
+			t.Errorf("expected no additional email sent during cooling period")
 		}
 	})
 }
