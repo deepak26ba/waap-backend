@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"time"
@@ -148,7 +149,7 @@ func (s *BrevoSender) SendVerificationEmail(ctx context.Context, toEmail, toName
     </tr>
   </table>
 </body>
-</html>`, toName, otp)
+</html>`, html.EscapeString(toName), otp)
 
 	payload := brevoEmailPayload{
 		Sender: brevoSenderInfo{

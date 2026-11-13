@@ -9,9 +9,11 @@ import (
 func TestLoadConfig_JWTSecretValidation(t *testing.T) {
 	origEnv := os.Getenv("ENV")
 	origSecret := os.Getenv("JWT_SECRET")
+	origBrevo := os.Getenv("BREVO_API_KEY")
 	defer func() {
 		_ = os.Setenv("ENV", origEnv)
 		_ = os.Setenv("JWT_SECRET", origSecret)
+		_ = os.Setenv("BREVO_API_KEY", origBrevo)
 	}()
 
 	t.Run("Development allows fallback secret", func(t *testing.T) {
@@ -53,13 +55,28 @@ func TestLoadConfig_JWTSecretValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("Production accepts valid 32+ char secret", func(t *testing.T) {
+	t.Run("Production rejects empty BREVO_API_KEY", func(t *testing.T) {
 		_ = os.Setenv("ENV", "production")
 		_ = os.Setenv("JWT_SECRET", "super-secure-production-jwt-secret-key-32-chars-long!")
+		_ = os.Setenv("BREVO_API_KEY", "")
+
+		_, err := LoadConfig()
+		if err == nil {
+			t.Fatalf("expected error in production when BREVO_API_KEY is empty")
+		}
+		if !strings.Contains(err.Error(), "BREVO_API_KEY environment variable is required") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("Production accepts valid 32+ char secret and Brevo API key", func(t *testing.T) {
+		_ = os.Setenv("ENV", "production")
+		_ = os.Setenv("JWT_SECRET", "super-secure-production-jwt-secret-key-32-chars-long!")
+		_ = os.Setenv("BREVO_API_KEY", "xkeysib-test-key-12345")
 
 		cfg, err := LoadConfig()
 		if err != nil {
-			t.Fatalf("expected success with strong secret, got: %v", err)
+			t.Fatalf("expected success with strong secret and brevo key, got: %v", err)
 		}
 		if cfg.JWTSecret != "super-secure-production-jwt-secret-key-32-chars-long!" {
 			t.Errorf("unexpected secret value: %s", cfg.JWTSecret)

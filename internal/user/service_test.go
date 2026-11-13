@@ -171,16 +171,16 @@ func TestUserService_Register(t *testing.T) {
 			t.Errorf("expected 6-digit verification OTP in email, got %s", sent.OTP)
 		}
 
-		// Verify OTP was stored in memory store
+		// Verify OTP was stored in memory store keyed by user ID
 		expectedHash := hashOTP(sent.OTP)
 		tokenStore.mu.RLock()
-		otpItem, exists := tokenStore.otps[expectedHash]
+		otpItem, exists := tokenStore.otps[res.User.ID]
 		tokenStore.mu.RUnlock()
 		if !exists {
-			t.Errorf("expected otp hash %s to exist in otp store", expectedHash)
+			t.Errorf("expected otp entry for user %s to exist in otp store", res.User.ID)
 		}
-		if otpItem.userID != res.User.ID {
-			t.Errorf("expected otp user ID %s, got %s", res.User.ID, otpItem.userID)
+		if otpItem.otpHash != expectedHash {
+			t.Errorf("expected otp hash %s, got %s", expectedHash, otpItem.otpHash)
 		}
 	})
 
@@ -327,7 +327,16 @@ func TestUserService_EmailVerification(t *testing.T) {
 	})
 
 	t.Run("Invalid OTP is rejected", func(t *testing.T) {
-		err := svc.VerifyEmail(ctx, "verify@example.com", "000000")
+		_, err := svc.Register(ctx, RegisterInput{
+			Email:    "invalidotp@example.com",
+			Password: "ValidPassword123",
+			FullName: "Invalid OTP User",
+		})
+		if err != nil {
+			t.Fatalf("failed to register: %v", err)
+		}
+
+		err = svc.VerifyEmail(ctx, "invalidotp@example.com", "000000")
 		if err == nil {
 			t.Fatal("expected error for invalid otp, got nil")
 		}
@@ -419,7 +428,7 @@ func TestUserService_EmailVerification(t *testing.T) {
 
 		expiredRawOTP := "987654"
 		expiredHash := hashOTP(expiredRawOTP)
-		tokenStore.Store(expiredHash, expiredUser.ID, -1*time.Second)
+		tokenStore.Store(expiredUser.ID, expiredHash, -1*time.Second)
 
 		err = svc.VerifyEmail(ctx, "expired@example.com", expiredRawOTP)
 		if err == nil {
@@ -441,6 +450,39 @@ func TestUserService_EmailVerification(t *testing.T) {
 		err = svc.VerifyEmail(ctx, "expired@example.com", expiredRawOTP)
 		if err == nil {
 			t.Fatal("expected error for purged otp, got nil")
+		}
+	})
+
+	t.Run("OTP remains unconsumed if database persistence fails", func(t *testing.T) {
+		reg, err := svc.Register(ctx, RegisterInput{
+			Email:    "dbfail@example.com",
+			Password: "ValidPassword123",
+			FullName: "DB Fail User",
+		})
+		if err != nil {
+			t.Fatalf("failed to register: %v", err)
+		}
+		testOTP := mailer.sentEmails[len(mailer.sentEmails)-1].OTP
+
+		// Remove user from repository to simulate persistence failure in MarkUserEmailVerified
+		delete(mock.usersByID, reg.User.ID)
+
+		err = svc.VerifyEmail(ctx, "dbfail@example.com", testOTP)
+		if err == nil {
+			t.Fatal("expected error on db failure, got nil")
+		}
+
+		// Restore user in mock repository to verify OTP can still be used on retry
+		mock.usersByID[reg.User.ID] = db.User{
+			ID:       reg.User.ID,
+			Email:    "dbfail@example.com",
+			FullName: "DB Fail User",
+		}
+
+		// Retry succeeds because OTP was not consumed on failure
+		err = svc.VerifyEmail(ctx, "dbfail@example.com", testOTP)
+		if err != nil {
+			t.Fatalf("expected retry to succeed with unconsumed OTP, got %v", err)
 		}
 	})
 }
@@ -490,21 +532,40 @@ func TestUserService_ResendVerificationEmail(t *testing.T) {
 		}
 	})
 
-	t.Run("Rejects resend when user is already verified", func(t *testing.T) {
+	t.Run("Already verified user returns nil (anti-enumeration)", func(t *testing.T) {
+		emailCountBefore := len(mailer.sentEmails)
 		err := svc.ResendVerificationEmail(ctx, "resend@example.com")
-		if err == nil {
-			t.Fatal("expected error when resending to verified user, got nil")
+		if err != nil {
+			t.Fatalf("expected nil error for anti-enumeration on verified account, got %v", err)
+		}
+		if len(mailer.sentEmails) != emailCountBefore {
+			t.Errorf("expected no additional email sent to verified user")
+		}
+	})
+
+	t.Run("Delivery failure returns error", func(t *testing.T) {
+		_, err := svc.Register(ctx, RegisterInput{
+			Email:    "mailerfail@example.com",
+			Password: "ValidPassword123",
+			FullName: "Mailer Fail",
+		})
+		if err != nil {
+			t.Fatalf("failed to register: %v", err)
 		}
 
+		mailer.err = errors.New("brevo network error")
+		defer func() { mailer.err = nil }()
+
+		err = svc.ResendVerificationEmail(ctx, "mailerfail@example.com")
+		if err == nil {
+			t.Fatal("expected error when email dispatch fails, got nil")
+		}
 		var apiErr *response.AppError
 		if !errors.As(err, &apiErr) {
 			t.Fatalf("expected AppError, got %T", err)
 		}
-		if apiErr.StatusCode != 400 {
-			t.Errorf("expected status 400, got %d", apiErr.StatusCode)
-		}
-		if apiErr.Code != "EMAIL_ALREADY_VERIFIED" {
-			t.Errorf("expected code EMAIL_ALREADY_VERIFIED, got %s", apiErr.Code)
+		if apiErr.StatusCode != 500 {
+			t.Errorf("expected status 500, got %d", apiErr.StatusCode)
 		}
 	})
 

@@ -469,10 +469,11 @@ func TestAuthHandler_ResendVerification(t *testing.T) {
 		}
 	})
 
-	t.Run("Already verified returns 400 Bad Request", func(t *testing.T) {
+	t.Run("Already verified account returns generic 200 OK (anti-enumeration)", func(t *testing.T) {
 		svc := &mockAuthService{
 			resendVerificationFunc: func(ctx context.Context, email string) error {
-				return response.NewBadRequestError("EMAIL_ALREADY_VERIFIED", "already verified")
+				// Anti-enumeration: returns nil for verified account
+				return nil
 			},
 		}
 		h := NewHandler(svc, nil)
@@ -485,8 +486,8 @@ func TestAuthHandler_ResendVerification(t *testing.T) {
 
 		r.ServeHTTP(w, req)
 
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("expected 400 Bad Request, got %d", w.Code)
+		if w.Code != http.StatusOK {
+			t.Errorf("expected 200 OK, got %d", w.Code)
 		}
 	})
 }
