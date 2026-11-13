@@ -3,13 +3,15 @@ package user
 import (
 	"context"
 
+	"github.com/gofrs/uuid/v5"
+
 	"waap-backend/pkg/db"
 )
 
 // Repository defines data access operations for users.
 type Repository interface {
 	GetByEmail(ctx context.Context, email string) (db.User, error)
-	GetByID(ctx context.Context, id int64) (db.User, error)
+	GetByID(ctx context.Context, id uuid.UUID) (db.User, error)
 	Create(ctx context.Context, params db.CreateUserParams) (db.User, error)
 	Update(ctx context.Context, params db.UpdateUserParams) (db.User, error)
 }
@@ -27,7 +29,7 @@ func (r *repository) GetByEmail(ctx context.Context, email string) (db.User, err
 	return r.queries.GetUserByEmail(ctx, email)
 }
 
-func (r *repository) GetByID(ctx context.Context, id int64) (db.User, error) {
+func (r *repository) GetByID(ctx context.Context, id uuid.UUID) (db.User, error) {
 	return r.queries.GetUserByID(ctx, id)
 }
 
@@ -38,4 +40,3 @@ func (r *repository) Create(ctx context.Context, params db.CreateUserParams) (db
 func (r *repository) Update(ctx context.Context, params db.UpdateUserParams) (db.User, error) {
 	return r.queries.UpdateUser(ctx, params)
 }
-

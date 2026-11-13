@@ -33,4 +33,3 @@ func (r *repository) GetProductBySlug(ctx context.Context, slug string) (db.Prod
 func (r *repository) ListCategories(ctx context.Context) ([]db.Category, error) {
 	return r.queries.ListCategories(ctx)
 }
-

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gofrs/uuid/v5"
 
 	"waap-backend/pkg/response"
 )
@@ -54,7 +55,7 @@ func TestAuthHandler_Register(t *testing.T) {
 		svc := &mockAuthService{
 			registerFunc: func(ctx context.Context, in RegisterInput) (*UserResponse, error) {
 				return &UserResponse{
-					ID:        1,
+					ID:        uuid.Must(uuid.NewV4()),
 					Email:     in.Email,
 					FullName:  in.FullName,
 					Role:      "customer",
@@ -135,7 +136,7 @@ func TestAuthHandler_Login(t *testing.T) {
 						TokenType:    "Bearer",
 					},
 					User: UserResponse{
-						ID:       1,
+						ID:       uuid.Must(uuid.NewV4()),
 						Email:    in.Email,
 						FullName: "Test User",
 						Role:     "customer",
@@ -222,4 +223,3 @@ func TestAuthHandler_Refresh(t *testing.T) {
 		}
 	})
 }
-

@@ -6,6 +6,8 @@ package db
 
 import (
 	"context"
+
+	uuid "github.com/gofrs/uuid/v5"
 )
 
 type Querier interface {
@@ -18,7 +20,7 @@ type Querier interface {
 	GetProductByID(ctx context.Context, id int64) (Product, error)
 	GetProductBySlug(ctx context.Context, slug string) (Product, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
-	GetUserByID(ctx context.Context, id int64) (User, error)
+	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	ListCategories(ctx context.Context) ([]Category, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 }

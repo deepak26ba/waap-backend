@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gofrs/uuid/v5"
 
 	"waap-backend/internal/user"
 	"waap-backend/pkg/response"
@@ -93,13 +94,13 @@ func RequireAdmin() gin.HandlerFunc {
 }
 
 // GetUserID retrieves the authenticated user's ID from the context.
-func GetUserID(c *gin.Context) (int64, bool) {
+func GetUserID(c *gin.Context) (uuid.UUID, bool) {
 	val, exists := c.Get(ContextUserID)
 	if !exists {
-		return 0, false
+		return uuid.Nil, false
 	}
 
-	id, ok := val.(int64)
+	id, ok := val.(uuid.UUID)
 	return id, ok
 }
 

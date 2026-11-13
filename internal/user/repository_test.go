@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"waap-backend/pkg/db"
@@ -13,21 +14,20 @@ import (
 type mockDBQuerier struct {
 	db.Querier
 	usersByEmail map[string]db.User
-	usersByID    map[int64]db.User
-	nextID       int64
+	usersByID    map[uuid.UUID]db.User
 }
 
 func newMockDBQuerier() *mockDBQuerier {
 	return &mockDBQuerier{
 		usersByEmail: make(map[string]db.User),
-		usersByID:    make(map[int64]db.User),
-		nextID:       1,
+		usersByID:    make(map[uuid.UUID]db.User),
 	}
 }
 
 func (m *mockDBQuerier) CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
+	newID := uuid.Must(uuid.NewV4())
 	u := db.User{
-		ID:           m.nextID,
+		ID:           newID,
 		Email:        arg.Email,
 		PasswordHash: arg.PasswordHash,
 		FullName:     arg.FullName,
@@ -37,7 +37,6 @@ func (m *mockDBQuerier) CreateUser(ctx context.Context, arg db.CreateUserParams)
 		CreatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		UpdatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 	}
-	m.nextID++
 	m.usersByEmail[u.Email] = u
 	m.usersByID[u.ID] = u
 	return u, nil
@@ -47,7 +46,7 @@ func (m *mockDBQuerier) GetUserByEmail(ctx context.Context, email string) (db.Us
 	return m.usersByEmail[email], nil
 }
 
-func (m *mockDBQuerier) GetUserByID(ctx context.Context, id int64) (db.User, error) {
+func (m *mockDBQuerier) GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error) {
 	return m.usersByID[id], nil
 }
 
@@ -81,7 +80,7 @@ func TestUserRepository(t *testing.T) {
 		t.Fatalf("failed to get user by email: %v", err)
 	}
 	if byEmail.ID != created.ID {
-		t.Errorf("expected ID %d, got %d", created.ID, byEmail.ID)
+		t.Errorf("expected ID %s, got %s", created.ID, byEmail.ID)
 	}
 
 	byID, err := repo.GetByID(ctx, created.ID)
@@ -92,4 +91,3 @@ func TestUserRepository(t *testing.T) {
 		t.Errorf("expected email repo@example.com, got %s", byID.Email)
 	}
 }
-

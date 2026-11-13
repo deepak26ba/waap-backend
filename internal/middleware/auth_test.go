@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gofrs/uuid/v5"
 
 	"waap-backend/internal/user"
 	"waap-backend/pkg/response"
@@ -26,7 +27,7 @@ func TestRequireAuth(t *testing.T) {
 			email, _ := GetUserEmail(c)
 			role, _ := GetUserRole(c)
 			response.OK(c, gin.H{
-				"user_id": userID,
+				"user_id": userID.String(),
 				"email":   email,
 				"role":    role,
 			})
@@ -64,7 +65,8 @@ func TestRequireAuth(t *testing.T) {
 	})
 
 	t.Run("Invalid Token Signature Returns 401", func(t *testing.T) {
-		tokens, _ := user.GenerateTokenPair(10, "wrong@test.com", "customer", "another-secret", 15*time.Minute, 1*time.Hour)
+		testID := uuid.Must(uuid.NewV4())
+		tokens, _ := user.GenerateTokenPair(testID, "wrong@test.com", "customer", "another-secret", 15*time.Minute, 1*time.Hour)
 		r := setupRouter()
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/protected", nil)
@@ -77,7 +79,8 @@ func TestRequireAuth(t *testing.T) {
 	})
 
 	t.Run("Refresh Token Rejected for Resource Auth Returns 401", func(t *testing.T) {
-		tokens, _ := user.GenerateTokenPair(10, "user@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
+		testID := uuid.Must(uuid.NewV4())
+		tokens, _ := user.GenerateTokenPair(testID, "user@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
 		r := setupRouter()
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/protected", nil)
@@ -90,7 +93,8 @@ func TestRequireAuth(t *testing.T) {
 	})
 
 	t.Run("Valid Access Token Populates Context and Returns 200", func(t *testing.T) {
-		tokens, _ := user.GenerateTokenPair(42, "alice@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
+		testID := uuid.Must(uuid.NewV4())
+		tokens, _ := user.GenerateTokenPair(testID, "alice@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
 		r := setupRouter()
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/protected", nil)
@@ -104,8 +108,8 @@ func TestRequireAuth(t *testing.T) {
 		var env response.Envelope
 		_ = json.Unmarshal(w.Body.Bytes(), &env)
 		dataMap := env.Data.(map[string]interface{})
-		if dataMap["user_id"] != float64(42) {
-			t.Errorf("expected user_id 42, got %v", dataMap["user_id"])
+		if dataMap["user_id"] != testID.String() {
+			t.Errorf("expected user_id %s, got %v", testID.String(), dataMap["user_id"])
 		}
 		if dataMap["email"] != "alice@test.com" {
 			t.Errorf("expected email alice@test.com, got %v", dataMap["email"])
@@ -137,7 +141,8 @@ func TestRequireRolesAndAdmin(t *testing.T) {
 	}
 
 	t.Run("Customer Cannot Access Admin Route (403 Forbidden)", func(t *testing.T) {
-		tokens, _ := user.GenerateTokenPair(1, "customer@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
+		testID := uuid.Must(uuid.NewV4())
+		tokens, _ := user.GenerateTokenPair(testID, "customer@test.com", "customer", secret, 15*time.Minute, 1*time.Hour)
 		r := setupRouter()
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/admin/metrics", nil)
@@ -156,7 +161,8 @@ func TestRequireRolesAndAdmin(t *testing.T) {
 	})
 
 	t.Run("Admin Can Access Admin Route (200 OK)", func(t *testing.T) {
-		tokens, _ := user.GenerateTokenPair(2, "admin@test.com", "admin", secret, 15*time.Minute, 1*time.Hour)
+		testID := uuid.Must(uuid.NewV4())
+		tokens, _ := user.GenerateTokenPair(testID, "admin@test.com", "admin", secret, 15*time.Minute, 1*time.Hour)
 		r := setupRouter()
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/admin/metrics", nil)
@@ -169,7 +175,8 @@ func TestRequireRolesAndAdmin(t *testing.T) {
 	})
 
 	t.Run("Manager Can Access Manager Route (200 OK)", func(t *testing.T) {
-		tokens, _ := user.GenerateTokenPair(3, "manager@test.com", "manager", secret, 15*time.Minute, 1*time.Hour)
+		testID := uuid.Must(uuid.NewV4())
+		tokens, _ := user.GenerateTokenPair(testID, "manager@test.com", "manager", secret, 15*time.Minute, 1*time.Hour)
 		r := setupRouter()
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/manager/reports", nil)

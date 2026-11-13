@@ -2,6 +2,7 @@ package cart
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 
 	"waap-backend/pkg/response"
@@ -28,7 +29,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 
 func (h *Handler) GetCart(c *gin.Context) {
 	response.OK(c, CartResponse{
-		ID:        "active-cart",
+		ID:        uuid.Must(uuid.NewV4()),
 		Items:     []Item{},
 		ItemCount: 0,
 	})

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -16,15 +17,13 @@ import (
 
 type mockUserRepository struct {
 	usersByEmail map[string]db.User
-	usersByID    map[int64]db.User
-	nextID       int64
+	usersByID    map[uuid.UUID]db.User
 }
 
 func newMockUserRepository() *mockUserRepository {
 	return &mockUserRepository{
 		usersByEmail: make(map[string]db.User),
-		usersByID:    make(map[int64]db.User),
-		nextID:       1,
+		usersByID:    make(map[uuid.UUID]db.User),
 	}
 }
 
@@ -33,8 +32,9 @@ func (m *mockUserRepository) Create(ctx context.Context, arg db.CreateUserParams
 		return db.User{}, errors.New("duplicate key value violates unique constraint \"users_email_key\"")
 	}
 
+	newID := uuid.Must(uuid.NewV4())
 	u := db.User{
-		ID:           m.nextID,
+		ID:           newID,
 		Email:        arg.Email,
 		PasswordHash: arg.PasswordHash,
 		FullName:     arg.FullName,
@@ -44,7 +44,6 @@ func (m *mockUserRepository) Create(ctx context.Context, arg db.CreateUserParams
 		CreatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		UpdatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 	}
-	m.nextID++
 	m.usersByEmail[u.Email] = u
 	m.usersByID[u.ID] = u
 	return u, nil
@@ -58,7 +57,7 @@ func (m *mockUserRepository) GetByEmail(ctx context.Context, email string) (db.U
 	return u, nil
 }
 
-func (m *mockUserRepository) GetByID(ctx context.Context, id int64) (db.User, error) {
+func (m *mockUserRepository) GetByID(ctx context.Context, id uuid.UUID) (db.User, error) {
 	u, exists := m.usersByID[id]
 	if !exists {
 		return db.User{}, pgx.ErrNoRows
@@ -104,8 +103,8 @@ func TestUserService_Register(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if res.ID == 0 {
-			t.Errorf("expected non-zero ID")
+		if res.ID == uuid.Nil {
+			t.Errorf("expected non-nil UUID")
 		}
 		if res.Email != "test@example.com" {
 			t.Errorf("expected email test@example.com, got %s", res.Email)
@@ -126,7 +125,7 @@ func TestUserService_Register(t *testing.T) {
 
 	t.Run("Duplicate Email Rejection (409 Conflict)", func(t *testing.T) {
 		in := RegisterInput{
-			Email:    "test@example.com",
+			Email:    "test@example.com", // already registered above
 			Password: "newpassword123",
 			FullName: "Jane Doe",
 		}
@@ -388,7 +387,8 @@ func TestUserService_RefreshToken(t *testing.T) {
 	})
 
 	t.Run("Refresh Token with Unknown User Returns 401", func(t *testing.T) {
-		unknownTokens, err := GenerateTokenPair(99999, "unknown@test.com", "customer", secret, 15*time.Minute, 7*24*time.Hour)
+		unknownID := uuid.Must(uuid.NewV4())
+		unknownTokens, err := GenerateTokenPair(unknownID, "unknown@test.com", "customer", secret, 15*time.Minute, 7*24*time.Hour)
 		if err != nil {
 			t.Fatalf("failed to generate token: %v", err)
 		}
@@ -432,7 +432,7 @@ func TestCheckDummyPassword(t *testing.T) {
 
 func TestGenerateAndValidateToken(t *testing.T) {
 	secret := "super-secure-jwt-test-secret-key-32b"
-	userID := int64(1001)
+	userID := uuid.Must(uuid.NewV4())
 	email := "user@example.com"
 	role := "customer"
 	accessTTL := 15 * time.Minute
@@ -473,7 +473,8 @@ func TestGenerateAndValidateToken(t *testing.T) {
 
 func TestValidateExpiredToken(t *testing.T) {
 	secret := "secret-key"
-	tokens, err := GenerateTokenPair(1, "test@test.com", "customer", secret, -1*time.Minute, -1*time.Minute)
+	userID := uuid.Must(uuid.NewV4())
+	tokens, err := GenerateTokenPair(userID, "test@test.com", "customer", secret, -1*time.Minute, -1*time.Minute)
 	if err != nil {
 		t.Fatalf("failed to generate token pair: %v", err)
 	}
@@ -483,4 +484,3 @@ func TestValidateExpiredToken(t *testing.T) {
 		t.Errorf("expected error when validating expired token")
 	}
 }
-

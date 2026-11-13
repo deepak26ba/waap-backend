@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -17,10 +18,10 @@ var ErrInvalidToken = errors.New("invalid or expired token")
 
 // Claims represents the JWT claims payload containing essential identity and authorization data.
 type Claims struct {
-	UserID    int64  `json:"user_id"`
-	Email     string `json:"email"`
-	Role      string `json:"role"`
-	TokenType string `json:"token_type"`
+	UserID    uuid.UUID `json:"user_id"`
+	Email     string    `json:"email"`
+	Role      string    `json:"role"`
+	TokenType string    `json:"token_type"`
 	jwt.RegisteredClaims
 }
 
@@ -35,7 +36,7 @@ type TokenPair struct {
 
 // UserResponse represents safe, serialized user profile data.
 type UserResponse struct {
-	ID          int64     `json:"id"`
+	ID          uuid.UUID `json:"id"`
 	Email       string    `json:"email"`
 	FullName    string    `json:"full_name"`
 	Role        string    `json:"role"`
@@ -67,4 +68,3 @@ type LoginResponse struct {
 type RefreshInput struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
-
