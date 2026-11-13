@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 
+	uuid "github.com/gofrs/uuid/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -82,7 +83,7 @@ SELECT id, email, password_hash, full_name, role, phone_number, is_active, creat
 WHERE id = $1 LIMIT 1
 `
 
-func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
+func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByID, id)
 	var i User
 	err := row.Scan(
@@ -109,7 +110,7 @@ RETURNING id, email, password_hash, full_name, role, phone_number, is_active, cr
 `
 
 type UpdateUserParams struct {
-	ID          int64       `json:"id"`
+	ID          uuid.UUID   `json:"id"`
 	FullName    string      `json:"full_name"`
 	PhoneNumber pgtype.Text `json:"phone_number"`
 }

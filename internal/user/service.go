@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -252,7 +253,7 @@ func CheckDummyPassword(password string) {
 }
 
 // GenerateTokenPair issues a short-lived access token and a longer-lived refresh token.
-func GenerateTokenPair(userID int64, email, role, secret string, accessTTL, refreshTTL time.Duration) (*TokenPair, error) {
+func GenerateTokenPair(userID uuid.UUID, email, role, secret string, accessTTL, refreshTTL time.Duration) (*TokenPair, error) {
 	if secret == "" {
 		return nil, errors.New("jwt secret key cannot be empty")
 	}
@@ -268,7 +269,7 @@ func GenerateTokenPair(userID int64, email, role, secret string, accessTTL, refr
 		Role:      role,
 		TokenType: TokenTypeAccess,
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   fmt.Sprintf("%d", userID),
+			Subject:   userID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(accessExpiry),
 		},
@@ -286,7 +287,7 @@ func GenerateTokenPair(userID int64, email, role, secret string, accessTTL, refr
 		Role:      role,
 		TokenType: TokenTypeRefresh,
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   fmt.Sprintf("%d", userID),
+			Subject:   userID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(refreshExpiry),
 		},
@@ -330,4 +331,3 @@ func ValidateToken(tokenString, secret string) (*Claims, error) {
 
 	return claims, nil
 }
-

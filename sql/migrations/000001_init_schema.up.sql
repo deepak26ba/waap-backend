@@ -8,7 +8,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- 1. Users
 CREATE TABLE users (
-    id BIGSERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(150) NOT NULL,
@@ -24,7 +24,7 @@ CREATE INDEX idx_users_email ON users(email);
 -- 2. Addresses
 CREATE TABLE addresses (
     id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     recipient_name VARCHAR(150) NOT NULL,
     phone VARCHAR(30) NOT NULL,
     street_line1 VARCHAR(255) NOT NULL,
@@ -101,7 +101,7 @@ CREATE INDEX idx_product_images_product ON product_images(product_id);
 -- 7. Carts & Cart Items
 CREATE TABLE carts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     guest_token VARCHAR(100),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -122,7 +122,7 @@ CREATE INDEX idx_cart_items_cart ON cart_items(cart_id);
 CREATE TABLE orders (
     id BIGSERIAL PRIMARY KEY,
     order_number VARCHAR(36) UNIQUE NOT NULL,
-    user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     customer_email VARCHAR(255) NOT NULL,
     customer_name VARCHAR(150) NOT NULL,
     customer_phone VARCHAR(30) NOT NULL,

@@ -5,12 +5,13 @@
 package db
 
 import (
+	uuid "github.com/gofrs/uuid/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Address struct {
 	ID            int64              `json:"id"`
-	UserID        int64              `json:"user_id"`
+	UserID        uuid.UUID          `json:"user_id"`
 	RecipientName string             `json:"recipient_name"`
 	Phone         string             `json:"phone"`
 	StreetLine1   string             `json:"street_line1"`
@@ -24,8 +25,8 @@ type Address struct {
 }
 
 type Cart struct {
-	ID         pgtype.UUID        `json:"id"`
-	UserID     pgtype.Int8        `json:"user_id"`
+	ID         uuid.UUID          `json:"id"`
+	UserID     pgtype.UUID        `json:"user_id"`
 	GuestToken pgtype.Text        `json:"guest_token"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
@@ -33,7 +34,7 @@ type Cart struct {
 
 type CartItem struct {
 	ID        int64              `json:"id"`
-	CartID    pgtype.UUID        `json:"cart_id"`
+	CartID    uuid.UUID          `json:"cart_id"`
 	VariantID int64              `json:"variant_id"`
 	Quantity  int32              `json:"quantity"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
@@ -52,7 +53,7 @@ type Category struct {
 type Order struct {
 	ID                      int64              `json:"id"`
 	OrderNumber             string             `json:"order_number"`
-	UserID                  pgtype.Int8        `json:"user_id"`
+	UserID                  pgtype.UUID        `json:"user_id"`
 	CustomerEmail           string             `json:"customer_email"`
 	CustomerName            string             `json:"customer_name"`
 	CustomerPhone           string             `json:"customer_phone"`
@@ -127,7 +128,7 @@ type ProductVariant struct {
 }
 
 type User struct {
-	ID           int64              `json:"id"`
+	ID           uuid.UUID          `json:"id"`
 	Email        string             `json:"email"`
 	PasswordHash string             `json:"password_hash"`
 	FullName     string             `json:"full_name"`
