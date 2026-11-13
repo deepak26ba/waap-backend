@@ -19,13 +19,13 @@ type Server struct {
 	cfg     *config.Config
 	log     *zap.Logger
 	pool    *pgxpool.Pool
-	queries *db.Queries
+	queries db.Querier
 	router  *gin.Engine
 	httpSrv *http.Server
 }
 
 // New creates and initializes a new Server instance.
-func New(cfg *config.Config, pool *pgxpool.Pool, queries *db.Queries, log *zap.Logger) *Server {
+func New(cfg *config.Config, pool *pgxpool.Pool, queries db.Querier, log *zap.Logger) *Server {
 	if cfg != nil && cfg.Env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gofrs/uuid/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/zap"
 
 	"waap-backend/internal/user"
@@ -19,6 +22,44 @@ import (
 	"waap-backend/pkg/response"
 )
 
+type mockRouterQuerier struct {
+	db.Querier
+	carts map[string]db.Cart
+}
+
+func newMockRouterQuerier() *mockRouterQuerier {
+	return &mockRouterQuerier{
+		carts: make(map[string]db.Cart),
+	}
+}
+
+func (m *mockRouterQuerier) GetCartByGuestToken(ctx context.Context, guestToken pgtype.Text) (db.Cart, error) {
+	if c, ok := m.carts[guestToken.String]; ok {
+		return c, nil
+	}
+	return db.Cart{}, pgx.ErrNoRows
+}
+
+func (m *mockRouterQuerier) GetCartByUserID(ctx context.Context, userID pgtype.UUID) (db.Cart, error) {
+	return db.Cart{}, pgx.ErrNoRows
+}
+
+func (m *mockRouterQuerier) CreateCart(ctx context.Context, arg db.CreateCartParams) (db.Cart, error) {
+	c := db.Cart{
+		ID:         uuid.Must(uuid.NewV4()),
+		UserID:     arg.UserID,
+		GuestToken: arg.GuestToken,
+	}
+	if arg.GuestToken.Valid {
+		m.carts[arg.GuestToken.String] = c
+	}
+	return c, nil
+}
+
+func (m *mockRouterQuerier) GetCartItems(ctx context.Context, cartID uuid.UUID) ([]db.CartItem, error) {
+	return []db.CartItem{}, nil
+}
+
 func TestAuthRouter_RegistrationValidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -26,7 +67,7 @@ func TestAuthRouter_RegistrationValidation(t *testing.T) {
 	cfg := &config.Config{
 		JWTSecret: "test-integration-secret",
 	}
-	router := NewRouter(cfg, nil, &db.Queries{}, zap.NewNop())
+	router := NewRouter(cfg, nil, newMockRouterQuerier(), zap.NewNop())
 
 	t.Run("Malformed JSON Request Body Returns 400", func(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewBufferString("{invalid-json"))
@@ -79,7 +120,7 @@ func TestAuthRouter_RBACProtection(t *testing.T) {
 	cfg := &config.Config{
 		JWTSecret: secret,
 	}
-	router := NewRouter(cfg, nil, &db.Queries{}, zap.NewNop())
+	router := NewRouter(cfg, nil, newMockRouterQuerier(), zap.NewNop())
 
 	t.Run("Protected Route Without Token Returns 401", func(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
