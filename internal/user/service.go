@@ -332,6 +332,8 @@ func (s *service) VerifyEmail(ctx context.Context, rawEmail, rawOTP string) erro
 	otpHash := hashOTP(rawOTP)
 	if err := s.tokenStore.Validate(u.ID, otpHash); err != nil {
 		switch {
+		case errors.Is(err, ErrOTPCoolingPeriod):
+			return response.NewAppError(http.StatusTooManyRequests, "OTP_COOLING_PERIOD", "too many failed attempts, cooling period active: please try again after 30 minutes")
 		case errors.Is(err, ErrTokenNotFound), errors.Is(err, ErrOTPNotFound):
 			return response.NewBadRequestError("INVALID_OTP", "invalid or expired verification otp")
 		case errors.Is(err, ErrTokenExpired), errors.Is(err, ErrOTPExpired):
@@ -387,6 +389,10 @@ func (s *service) ResendVerificationEmail(ctx context.Context, rawEmail string) 
 		// Anti-enumeration: return the same success response as other accounts
 		s.log.Info("verification resend skipped for verified email", zap.String("user_id", u.ID.String()))
 		return nil
+	}
+
+	if s.tokenStore.IsLocked(u.ID) {
+		return response.NewAppError(http.StatusTooManyRequests, "OTP_COOLING_PERIOD", "too many failed attempts, cooling period active: please try again after 30 minutes")
 	}
 
 	// Invalidate any older pending OTPs for this user
