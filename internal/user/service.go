@@ -392,7 +392,9 @@ func (s *service) ResendVerificationEmail(ctx context.Context, rawEmail string) 
 	}
 
 	if s.tokenStore.IsLocked(u.ID) {
-		return response.NewAppError(http.StatusTooManyRequests, "OTP_COOLING_PERIOD", "too many failed attempts, cooling period active: please try again after 30 minutes")
+		// Anti-enumeration: return the same success response during cooling period without issuing a new OTP
+		s.log.Info("verification resend suppressed during cooling period", zap.String("user_id", u.ID.String()))
+		return nil
 	}
 
 	// Invalidate any older pending OTPs for this user
