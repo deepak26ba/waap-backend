@@ -41,12 +41,13 @@ type TokenPair struct {
 
 // UserResponse represents safe, serialized user profile data.
 type UserResponse struct {
-	ID          uuid.UUID `json:"id"`
-	Email       string    `json:"email"`
-	FullName    string    `json:"full_name"`
-	Role        string    `json:"role"`
-	PhoneNumber *string   `json:"phone_number,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID            uuid.UUID `json:"id"`
+	Email         string    `json:"email"`
+	FullName      string    `json:"full_name"`
+	Role          string    `json:"role"`
+	PhoneNumber   *string   `json:"phone_number,omitempty"`
+	EmailVerified bool      `json:"email_verified"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // RegisterInput models the registration request payload.
@@ -55,6 +56,16 @@ type RegisterInput struct {
 	Password    string  `json:"password"`
 	FullName    string  `json:"full_name"`
 	PhoneNumber *string `json:"phone_number,omitempty"`
+}
+
+// VerifyEmailInput models the email verification request payload.
+type VerifyEmailInput struct {
+	Token string `json:"token" binding:"required"`
+}
+
+// VerifyEmailResponse models the response when an email is successfully verified.
+type VerifyEmailResponse struct {
+	Message string `json:"message"`
 }
 
 // LoginInput models the login request credentials.

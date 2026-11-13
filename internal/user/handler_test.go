@@ -20,6 +20,7 @@ type mockAuthService struct {
 	loginFunc        func(ctx context.Context, in LoginInput) (*LoginResponse, error)
 	refreshTokenFunc func(ctx context.Context, refreshToken string) (*TokenPair, error)
 	getProfileFunc   func(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
+	verifyEmailFunc  func(ctx context.Context, token string) error
 }
 
 func (m *mockAuthService) Register(ctx context.Context, in RegisterInput) (*UserResponse, error) {
@@ -50,6 +51,13 @@ func (m *mockAuthService) GetProfile(ctx context.Context, userID uuid.UUID) (*Us
 	return nil, nil
 }
 
+func (m *mockAuthService) VerifyEmail(ctx context.Context, token string) error {
+	if m.verifyEmailFunc != nil {
+		return m.verifyEmailFunc(ctx, token)
+	}
+	return nil
+}
+
 func setupTestRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -57,6 +65,7 @@ func setupTestRouter(h *Handler) *gin.Engine {
 	rg.POST("/register", h.Register)
 	rg.POST("/login", h.Login)
 	rg.POST("/refresh", h.Refresh)
+	rg.POST("/verify-email", h.VerifyEmail)
 	return r
 }
 
@@ -100,7 +109,8 @@ func TestAuthHandler_Register(t *testing.T) {
 		h := NewHandler(&mockAuthService{}, nil)
 		r := setupTestRouter(h)
 
-		req, _ := http.NewRequest(http.MethodPost, "/auth/register", bytes.NewBufferString("{invalid-json"))
+		body := []byte(`{"email":`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/register", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -111,38 +121,36 @@ func TestAuthHandler_Register(t *testing.T) {
 		}
 	})
 
-	t.Run("Service validation error returns 422", func(t *testing.T) {
+	t.Run("Service conflict returns 409 Conflict", func(t *testing.T) {
 		svc := &mockAuthService{
 			registerFunc: func(ctx context.Context, in RegisterInput) (*UserResponse, error) {
-				return nil, response.NewValidationError("validation failed", []response.FieldError{
-					{Field: "email", Message: "invalid email format"},
-				})
+				return nil, response.NewConflictError("EMAIL_ALREADY_EXISTS", "user exists")
 			},
 		}
 		h := NewHandler(svc, nil)
 		r := setupTestRouter(h)
 
-		body := []byte(`{"email":"bad","password":"password123","full_name":"Test"}`)
+		body := []byte(`{"email":"existing@example.com","password":"password123","full_name":"Existing"}`)
 		req, _ := http.NewRequest(http.MethodPost, "/auth/register", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
 		r.ServeHTTP(w, req)
 
-		if w.Code != http.StatusUnprocessableEntity {
-			t.Errorf("expected 422 Unprocessable Entity, got %d", w.Code)
+		if w.Code != http.StatusConflict {
+			t.Errorf("expected 409 Conflict, got %d", w.Code)
 		}
 	})
 }
 
 func TestAuthHandler_Login(t *testing.T) {
-	t.Run("Valid credentials returns 200 OK", func(t *testing.T) {
+	t.Run("Valid credentials return 200 OK with tokens", func(t *testing.T) {
 		svc := &mockAuthService{
 			loginFunc: func(ctx context.Context, in LoginInput) (*LoginResponse, error) {
 				return &LoginResponse{
 					TokenPair: TokenPair{
-						AccessToken:  "mock-access-token",
-						RefreshToken: "mock-refresh-token",
+						AccessToken:  "valid-access-token",
+						RefreshToken: "valid-refresh-token",
 						TokenType:    "Bearer",
 					},
 					User: UserResponse{
@@ -165,14 +173,14 @@ func TestAuthHandler_Login(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
-			t.Fatalf("expected 200 OK, got %d", w.Code)
+			t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
 		}
 	})
 
-	t.Run("Invalid credentials returns 401 Unauthorized", func(t *testing.T) {
+	t.Run("Invalid credentials return 401 Unauthorized", func(t *testing.T) {
 		svc := &mockAuthService{
 			loginFunc: func(ctx context.Context, in LoginInput) (*LoginResponse, error) {
-				return nil, response.NewUnauthorizedError("invalid email or password")
+				return nil, response.NewUnauthorizedError("invalid credentials")
 			},
 		}
 		h := NewHandler(svc, nil)
@@ -189,10 +197,26 @@ func TestAuthHandler_Login(t *testing.T) {
 			t.Errorf("expected 401 Unauthorized, got %d", w.Code)
 		}
 	})
+
+	t.Run("Malformed JSON returns 400 Bad Request", func(t *testing.T) {
+		h := NewHandler(&mockAuthService{}, nil)
+		r := setupTestRouter(h)
+
+		body := []byte(`{"email":`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/login", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request, got %d", w.Code)
+		}
+	})
 }
 
-func TestAuthHandler_Refresh(t *testing.T) {
-	t.Run("Valid refresh token returns 200 OK", func(t *testing.T) {
+func TestAuthHandler_RefreshToken(t *testing.T) {
+	t.Run("Valid refresh token returns 200 OK with new tokens", func(t *testing.T) {
 		svc := &mockAuthService{
 			refreshTokenFunc: func(ctx context.Context, refreshToken string) (*TokenPair, error) {
 				return &TokenPair{
@@ -223,6 +247,119 @@ func TestAuthHandler_Refresh(t *testing.T) {
 
 		body := []byte(`{}`)
 		req, _ := http.NewRequest(http.MethodPost, "/auth/refresh", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request, got %d", w.Code)
+		}
+	})
+}
+
+func TestAuthHandler_VerifyEmail(t *testing.T) {
+	t.Run("Valid token returns 200 OK", func(t *testing.T) {
+		svc := &mockAuthService{
+			verifyEmailFunc: func(ctx context.Context, token string) error {
+				if token != "valid-token-123" {
+					return response.NewBadRequestError("INVALID_TOKEN", "invalid verification token")
+				}
+				return nil
+			},
+		}
+		h := NewHandler(svc, nil)
+		r := setupTestRouter(h)
+
+		body := []byte(`{"token":"valid-token-123"}`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var env response.Envelope
+		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+			t.Fatalf("failed to decode response envelope: %v", err)
+		}
+		if !env.Success {
+			t.Errorf("expected success to be true")
+		}
+	})
+
+	t.Run("Missing or empty token returns 400 Bad Request", func(t *testing.T) {
+		h := NewHandler(&mockAuthService{}, nil)
+		r := setupTestRouter(h)
+
+		body := []byte(`{}`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request, got %d", w.Code)
+		}
+	})
+
+	t.Run("Invalid token returns 400 Bad Request with error envelope", func(t *testing.T) {
+		svc := &mockAuthService{
+			verifyEmailFunc: func(ctx context.Context, token string) error {
+				return response.NewBadRequestError("INVALID_TOKEN", "invalid verification token")
+			},
+		}
+		h := NewHandler(svc, nil)
+		r := setupTestRouter(h)
+
+		body := []byte(`{"token":"invalid-token"}`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request, got %d", w.Code)
+		}
+	})
+
+	t.Run("Expired token returns 400 Bad Request", func(t *testing.T) {
+		svc := &mockAuthService{
+			verifyEmailFunc: func(ctx context.Context, token string) error {
+				return response.NewBadRequestError("TOKEN_EXPIRED", "verification token has expired")
+			},
+		}
+		h := NewHandler(svc, nil)
+		r := setupTestRouter(h)
+
+		body := []byte(`{"token":"expired-token"}`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request, got %d", w.Code)
+		}
+	})
+
+	t.Run("Already used token returns 400 Bad Request", func(t *testing.T) {
+		svc := &mockAuthService{
+			verifyEmailFunc: func(ctx context.Context, token string) error {
+				return response.NewBadRequestError("TOKEN_ALREADY_USED", "token already used")
+			},
+		}
+		h := NewHandler(svc, nil)
+		r := setupTestRouter(h)
+
+		body := []byte(`{"token":"reused-token"}`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 

@@ -30,7 +30,13 @@ type Config struct {
 	AutoMigrate       bool
 
 	// Auth
-	JWTSecret string
+	JWTSecret            string
+	VerificationTokenTTL time.Duration
+
+	// Email (Brevo)
+	BrevoAPIKey    string
+	BrevoFromEmail string
+	BrevoFromName  string
 
 	// Security & Limits
 	CORSAllowedOrigins []string
@@ -75,6 +81,11 @@ func LoadConfig() (*Config, error) {
 	autoMigrate := getEnvAsBool("DB_AUTO_MIGRATE", true)
 	env := getEnv("ENV", "development")
 
+	brevoAPIKey := getEnv("BREVO_API_KEY", "")
+	brevoFromEmail := getEnv("BREVO_FROM_EMAIL", "olivergot26@gmail.com")
+	brevoFromName := getEnv("BREVO_FROM_NAME", "WAAP")
+	verificationTokenTTL := getEnvAsDuration("VERIFICATION_TOKEN_TTL", 24*time.Hour)
+
 	jwtSecret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	if jwtSecret == "" {
 		if env == "production" {
@@ -86,25 +97,29 @@ func LoadConfig() (*Config, error) {
 	}
 
 	cfg := &Config{
-		Port:               getEnv("PORT", "8080"),
-		Env:                env,
-		DBHost:             dbHost,
-		DBPort:             dbPort,
-		DBUser:             dbUser,
-		DBPassword:         dbPass,
-		DBName:             dbName,
-		DBSSLMode:          dbSSLMode,
-		DBMaxConns:         dbMaxConns,
-		DBMinConns:         dbMinConns,
-		DBMaxConnLifetime:  dbMaxConnLifetime,
-		DBMaxConnIdleTime:  dbMaxConnIdleTime,
-		DatabaseURL:        dbURL,
-		AutoMigrate:        autoMigrate,
-		JWTSecret:          jwtSecret,
-		CORSAllowedOrigins: corsOrigins,
-		MaxBodySizeBytes:   maxBodySizeBytes,
-		RateLimitRPS:       rateLimitRPS,
-		RateLimitBurst:     rateLimitBurst,
+		Port:                 getEnv("PORT", "8080"),
+		Env:                  env,
+		DBHost:               dbHost,
+		DBPort:               dbPort,
+		DBUser:               dbUser,
+		DBPassword:           dbPass,
+		DBName:               dbName,
+		DBSSLMode:            dbSSLMode,
+		DBMaxConns:           dbMaxConns,
+		DBMinConns:           dbMinConns,
+		DBMaxConnLifetime:    dbMaxConnLifetime,
+		DBMaxConnIdleTime:    dbMaxConnIdleTime,
+		DatabaseURL:          dbURL,
+		AutoMigrate:          autoMigrate,
+		JWTSecret:            jwtSecret,
+		VerificationTokenTTL: verificationTokenTTL,
+		BrevoAPIKey:          brevoAPIKey,
+		BrevoFromEmail:       brevoFromEmail,
+		BrevoFromName:        brevoFromName,
+		CORSAllowedOrigins:   corsOrigins,
+		MaxBodySizeBytes:     maxBodySizeBytes,
+		RateLimitRPS:         rateLimitRPS,
+		RateLimitBurst:       rateLimitBurst,
 	}
 
 	return cfg, nil

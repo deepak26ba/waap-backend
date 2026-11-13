@@ -25,55 +25,67 @@ func AutoMigrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("failed to initialize schema_migrations table: %w", err)
 	}
 
-	// Check if initial schema is already applied
-	var applied bool
-	err = pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM schema_migrations WHERE version = '000001_init_schema'
-		);
-	`).Scan(&applied)
-	if err != nil {
-		return fmt.Errorf("failed to query migration status: %w", err)
+	migrations := []struct {
+		version string
+		file    string
+	}{
+		{version: "000001_init_schema", file: "000001_init_schema.up.sql"},
+		{version: "000002_add_email_verification", file: "000002_add_email_verification.up.sql"},
 	}
 
-	if applied {
-		return nil
-	}
+	for _, m := range migrations {
+		var applied bool
+		err = pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM schema_migrations WHERE version = $1
+			);
+		`, m.version).Scan(&applied)
+		if err != nil {
+			return fmt.Errorf("failed to query migration status for %s: %w", m.version, err)
+		}
 
-	// Locate migration script across standard local and container paths
-	candidates := []string{
-		"sql/migrations/000001_init_schema.up.sql",
-		"/app/sql/migrations/000001_init_schema.up.sql",
-		"../sql/migrations/000001_init_schema.up.sql",
-		"../../sql/migrations/000001_init_schema.up.sql",
-	}
+		if applied {
+			continue
+		}
 
-	var ddl []byte
-	for _, p := range candidates {
-		if data, readErr := os.ReadFile(p); readErr == nil {
-			ddl = data
-			break
+		candidates := []string{
+			fmt.Sprintf("sql/migrations/%s", m.file),
+			fmt.Sprintf("/app/sql/migrations/%s", m.file),
+			fmt.Sprintf("../sql/migrations/%s", m.file),
+			fmt.Sprintf("../../sql/migrations/%s", m.file),
+		}
+
+		var ddl []byte
+		for _, p := range candidates {
+			if data, readErr := os.ReadFile(p); readErr == nil {
+				ddl = data
+				break
+			}
+		}
+
+		if len(ddl) == 0 {
+			return fmt.Errorf("migration file %s not found in candidate paths", m.file)
+		}
+
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to start migration transaction for %s: %w", m.version, err)
+		}
+
+		if _, err := tx.Exec(ctx, string(ddl)); err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("failed to apply migration %s: %w", m.version, err)
+		}
+
+		if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES ($1)", m.version); err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("failed to record schema version for %s: %w", m.version, err)
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("failed to commit migration %s: %w", m.version, err)
 		}
 	}
 
-	if len(ddl) == 0 {
-		return fmt.Errorf("migration file 000001_init_schema.up.sql not found in candidate paths")
-	}
-
-	// Apply migration atomically
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to start migration transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, string(ddl)); err != nil {
-		return fmt.Errorf("failed to apply migration schema: %w", err)
-	}
-
-	if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES ('000001_init_schema')"); err != nil {
-		return fmt.Errorf("failed to record schema version: %w", err)
-	}
-
-	return tx.Commit(ctx)
+	return nil
 }

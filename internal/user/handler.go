@@ -101,6 +101,33 @@ func (h *Handler) Refresh(c *gin.Context) {
 	response.OK(c, tokens)
 }
 
+// VerifyEmail godoc
+// @Summary Verify user email address with verification token
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body VerifyEmailInput true "Email Verification Payload"
+// @Success 200 {object} response.Envelope{data=VerifyEmailResponse}
+// @Failure 400 {object} response.Envelope{error=response.APIError}
+// @Failure 500 {object} response.Envelope{error=response.APIError}
+// @Router /auth/verify-email [post]
+func (h *Handler) VerifyEmail(c *gin.Context) {
+	var in VerifyEmailInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.BadRequest(c, "INVALID_REQUEST_BODY", "malformed or missing JSON request body: token is required")
+		return
+	}
+
+	if err := h.service.VerifyEmail(c.Request.Context(), in.Token); err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.OK(c, VerifyEmailResponse{
+		Message: "email successfully verified",
+	})
+}
+
 // GetProfile godoc
 // @Summary Get current user profile
 // @Tags Users
