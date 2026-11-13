@@ -75,76 +75,140 @@ func (s *BrevoSender) SendVerificationEmail(ctx context.Context, toEmail, toName
 		return fmt.Errorf("brevo API key is not configured")
 	}
 
-	html := fmt.Sprintf(`<!DOCTYPE html>
+	htmlContent := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
   <title>Your WAAP Verification OTP</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      supported-color-schemes: light dark;
+    }
+    @media (prefers-color-scheme: dark) {
+      body, .email-bg { background-color: #0b0f19 !important; }
+      .email-card { background-color: #1e293b !important; border-color: #334155 !important; }
+      .email-title { color: #f8fafc !important; }
+      .email-text { color: #cbd5e1 !important; }
+      .email-name { color: #ffffff !important; }
+      .otp-box { background-color: #0f172a !important; border-color: #334155 !important; }
+      .otp-pill { background-color: #1e1b4b !important; border-color: #4338ca !important; }
+      .otp-text { color: #a5b4fc !important; }
+      .otp-hint { color: #94a3b8 !important; }
+      .warning-card { background-color: #2c0b0e !important; border-color: #881337 !important; border-left-color: #f43f5e !important; }
+      .warning-heading { color: #fda4af !important; }
+      .warning-body { color: #fecdd3 !important; }
+      .sub-text { color: #64748b !important; }
+      .footer-card { background-color: #0f172a !important; border-top-color: #334155 !important; }
+      .footer-title { color: #94a3b8 !important; }
+      .footer-text { color: #64748b !important; }
+    }
+  </style>
 </head>
-<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-  <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" style="background-color: #f8fafc; padding: 40px 16px;">
+<body class="email-bg" style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;">
+  <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" class="email-bg" style="background-color: #f1f5f9; padding: 48px 16px;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" style="max-width: 580px; width: 100%%; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05); overflow: hidden; border: 1px solid #e2e8f0;">
-          <!-- Header with Logo -->
+        <!-- Main Card -->
+        <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" class="email-card" style="max-width: 560px; width: 100%%; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01); border: 1px solid #e2e8f0;">
+          
+          <!-- Top Gradient Accent Bar -->
           <tr>
-            <td align="center" style="background: linear-gradient(135deg, #1e293b 0%%, #0f172a 100%%); padding: 32px 20px;">
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+            <td style="height: 5px; background: linear-gradient(90deg, #4f46e5 0%%, #7c3aed 50%%, #06b6d4 100%%); line-height: 5px; font-size: 1px;">&nbsp;</td>
+          </tr>
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color: #0f172a; padding: 32px 36px; text-align: center;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
                 <tr>
                   <td style="vertical-align: middle; padding-right: 12px;">
-                    <div style="background: linear-gradient(135deg, #4f46e5 0%%, #7c3aed 100%%); width: 44px; height: 44px; border-radius: 10px; text-align: center; color: #ffffff; font-size: 22px; font-weight: bold; line-height: 44px;">
+                    <div style="background: linear-gradient(135deg, #4f46e5 0%%, #7c3aed 100%%); width: 44px; height: 44px; border-radius: 12px; text-align: center; color: #ffffff; font-size: 22px; font-weight: 800; line-height: 44px; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);">
                       W
                     </div>
                   </td>
-                  <td style="vertical-align: middle;">
-                    <span style="font-size: 26px; font-weight: 800; letter-spacing: 2px; color: #ffffff;">WAAP</span>
+                  <td style="vertical-align: middle; text-align: left;">
+                    <div style="font-size: 24px; font-weight: 800; letter-spacing: 2px; color: #ffffff; line-height: 1.1;">WAAP</div>
+                    <div style="font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #94a3b8; margin-top: 2px;">Account Security</div>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
-          <!-- Main Body -->
+
+          <!-- Body Content -->
           <tr>
-            <td style="padding: 36px 32px; color: #334155;">
-              <h1 style="margin: 0 0 16px 0; font-size: 22px; font-weight: 700; color: #0f172a; text-align: center;">Verify Your Email Address</h1>
-              <p style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.6; color: #475569;">
-                Hi <strong>%s</strong>,
+            <td style="padding: 40px 36px 32px 36px;">
+              <h1 class="email-title" style="margin: 0 0 16px 0; font-size: 22px; font-weight: 700; color: #0f172a; text-align: center; letter-spacing: -0.3px;">
+                Verify Your Email Address
+              </h1>
+              <p class="email-text" style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.6; color: #475569;">
+                Hi <strong class="email-name" style="color: #0f172a;">%s</strong>,
               </p>
-              <p style="margin: 0 0 24px 0; font-size: 15px; line-height: 1.6; color: #475569;">
-                Thank you for joining WAAP! Please use the 6-digit One-Time Password (OTP) below to verify your email address and activate your account.
+              <p class="email-text" style="margin: 0 0 28px 0; font-size: 15px; line-height: 1.6; color: #475569;">
+                Welcome to WAAP! To finalize your registration and protect your account, please enter the One-Time Password (OTP) shown below:
               </p>
-              
-              <!-- OTP Display Box -->
-              <div style="background-color: #f1f5f9; border: 2px dashed #cbd5e1; border-radius: 8px; padding: 24px 20px; text-align: center; margin: 28px 0;">
-                <span style="display: block; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; color: #64748b; margin-bottom: 12px;">Your Verification OTP</span>
-                <span style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #4f46e5; display: inline-block;">%s</span>
+
+              <!-- OTP Code Box -->
+              <div class="otp-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 28px 20px; text-align: center; margin: 0 0 28px 0;">
+                <span class="otp-hint" style="display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: #64748b; margin-bottom: 12px;">Your One-Time Password</span>
+                <div class="otp-pill" style="display: inline-block; background: #ffffff; border: 2px solid #cbd5e1; border-radius: 10px; padding: 14px 28px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);">
+                  <span class="otp-text" style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Monaco, monospace; font-size: 36px; font-weight: 800; letter-spacing: 10px; color: #4338ca; display: inline-block; line-height: 1;">%s</span>
+                </div>
+                <div class="otp-hint" style="margin-top: 14px; font-size: 12px; font-weight: 600; color: #64748b;">
+                  ⏱️ Valid for <span class="email-name" style="color: #0f172a; font-weight: 700;">5 minutes</span> only
+                </div>
               </div>
 
-              <!-- Expiry Alert -->
-              <div style="background-color: #fffbeb; border-left: 4px solid #f59e0b; padding: 12px 16px; border-radius: 4px; margin-bottom: 24px;">
-                <p style="margin: 0; font-size: 13px; line-height: 1.5; color: #92400e;">
-                  <strong>Important:</strong> This verification OTP will expire in <strong>5 minutes</strong>. Do not share this code with anyone.
-                </p>
+              <!-- Security Warning Callout (CRITICAL) -->
+              <div class="warning-card" style="background-color: #fff1f2; border: 1px solid #fecdd3; border-left: 4px solid #e11d48; border-radius: 8px; padding: 16px 18px; margin: 0 0 28px 0;">
+                <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td style="vertical-align: top; width: 28px; font-size: 18px; line-height: 1.2;">
+                      ⚠️
+                    </td>
+                    <td style="vertical-align: top;">
+                      <div class="warning-heading" style="font-size: 13px; font-weight: 700; color: #9f1239; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">
+                        Do Not Share This OTP
+                      </div>
+                      <div class="warning-body" style="font-size: 13px; line-height: 1.5; color: #be123c;">
+                        Never share this code with anyone under any circumstances. <strong>WAAP staff, customer support, or administrators will NEVER ask for your OTP or password.</strong> Anyone asking for this code is attempting unauthorized access.
+                      </div>
+                    </td>
+                  </tr>
+                </table>
               </div>
 
-              <p style="margin: 0 0 12px 0; font-size: 14px; line-height: 1.6; color: #64748b;">
-                If you did not register for an account on WAAP, please ignore this email.
+              <p class="sub-text" style="margin: 0; font-size: 13px; line-height: 1.6; color: #94a3b8; text-align: center;">
+                If you didn't create an account with WAAP, you can safely ignore this email. No changes will occur without this OTP.
               </p>
             </td>
           </tr>
+
           <!-- Footer -->
           <tr>
-            <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 24px 32px; text-align: center;">
-              <p style="margin: 0 0 8px 0; font-size: 12px; color: #94a3b8;">
-                &copy; 2026 WAAP E-Commerce Platform. All rights reserved.
+            <td class="footer-card" style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 24px 36px; text-align: center;">
+              <p class="footer-title" style="margin: 0 0 6px 0; font-size: 12px; font-weight: 600; color: #64748b;">
+                WAAP E-Commerce Platform
               </p>
-              <p style="margin: 0; font-size: 12px; color: #94a3b8;">
-                This is an automated security notification. Please do not reply directly.
+              <p class="footer-text" style="margin: 0 0 8px 0; font-size: 11px; color: #94a3b8;">
+                &copy; 2026 WAAP Inc. All rights reserved. &bull; Secure Authentication Service
+              </p>
+              <p class="footer-text" style="margin: 0; font-size: 11px; line-height: 1.4; color: #94a3b8;">
+                This is an automated security transmission. Please do not reply directly to this email.
               </p>
             </td>
           </tr>
+
         </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
       </td>
     </tr>
   </table>
@@ -163,7 +227,7 @@ func (s *BrevoSender) SendVerificationEmail(ctx context.Context, toEmail, toName
 			},
 		},
 		Subject:     fmt.Sprintf("Your WAAP Verification OTP: %s", otp),
-		HTMLContent: html,
+		HTMLContent: htmlContent,
 	}
 
 	bodyBytes, err := json.Marshal(payload)
