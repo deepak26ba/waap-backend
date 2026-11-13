@@ -10,6 +10,7 @@ import (
 	"waap-backend/internal/middleware"
 	"waap-backend/internal/product"
 	"waap-backend/internal/user"
+	"waap-backend/pkg/response"
 )
 
 // RegisterV1 mounts all version 1 API endpoints under the /api/v1 route group.
@@ -67,7 +68,9 @@ func RegisterV1(r *gin.Engine, deps Dependencies) {
 		admin := apiV1.Group("/admin")
 		admin.Use(middleware.RequireAuth(jwtSecret), middleware.RequireAdmin())
 		{
-			admin.GET("/ping", adminPingHandler)
+			admin.GET("/ping", func(c *gin.Context) {
+				response.OK(c, gin.H{"status": "admin access granted"})
+			})
 		}
 	}
 }
