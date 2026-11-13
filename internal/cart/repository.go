@@ -85,25 +85,10 @@ func (r *repository) getOrCreateCartTx(ctx context.Context, userID *uuid.UUID, g
 	return res, nil
 }
 
-func (r *repository) getOrCreateCartDirect(ctx context.Context, q db.Querier, userID *uuid.UUID, guestToken string) (res *CartResponse, err error) {
+func (r *repository) getOrCreateCartDirect(ctx context.Context, q db.Querier, userID *uuid.UUID, guestToken string) (*CartResponse, error) {
 	if q == nil {
 		return nil, errors.New("database querier is uninitialized")
 	}
-
-	defer func() {
-		if rec := recover(); rec != nil {
-			// Fallback stub for tests running with uninitialized db.Queries
-			tok := guestToken
-			res = &CartResponse{
-				ID:         uuid.Must(uuid.NewV4()),
-				UserID:     userID,
-				GuestToken: &tok,
-				Items:      []Item{},
-				ItemCount:  0,
-			}
-			err = nil
-		}
-	}()
 
 	var cart db.Cart
 
