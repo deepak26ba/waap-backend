@@ -26,32 +26,12 @@ SET full_name = COALESCE($2, full_name),
 WHERE id = $1
 RETURNING *;
 
--- name: CreateEmailVerificationToken :one
-INSERT INTO email_verification_tokens (
-    user_id,
-    token_hash,
-    expires_at
-) VALUES (
-    $1, $2, $3
-)
-RETURNING *;
-
--- name: GetEmailVerificationTokenByHash :one
-SELECT * FROM email_verification_tokens
-WHERE token_hash = $1
-LIMIT 1;
-
--- name: MarkEmailVerificationTokenUsed :one
-UPDATE email_verification_tokens
-SET used_at = CURRENT_TIMESTAMP
-WHERE id = $1
-RETURNING *;
-
 -- name: MarkUserEmailVerified :one
 UPDATE users
 SET email_verified = TRUE,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
 RETURNING *;
+
 
 

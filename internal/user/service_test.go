@@ -18,17 +18,12 @@ import (
 type mockUserRepository struct {
 	usersByEmail map[string]db.User
 	usersByID    map[uuid.UUID]db.User
-	tokensByHash map[string]db.EmailVerificationToken
-	tokensByID   map[int64]db.EmailVerificationToken
-	tokenSeq     int64
 }
 
 func newMockUserRepository() *mockUserRepository {
 	return &mockUserRepository{
 		usersByEmail: make(map[string]db.User),
 		usersByID:    make(map[uuid.UUID]db.User),
-		tokensByHash: make(map[string]db.EmailVerificationToken),
-		tokensByID:   make(map[int64]db.EmailVerificationToken),
 	}
 }
 
@@ -87,39 +82,6 @@ func (m *mockUserRepository) Update(ctx context.Context, arg db.UpdateUserParams
 	return u, nil
 }
 
-func (m *mockUserRepository) CreateVerificationToken(ctx context.Context, arg db.CreateEmailVerificationTokenParams) (db.EmailVerificationToken, error) {
-	m.tokenSeq++
-	tok := db.EmailVerificationToken{
-		ID:        m.tokenSeq,
-		UserID:    arg.UserID,
-		TokenHash: arg.TokenHash,
-		ExpiresAt: arg.ExpiresAt,
-		CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
-	}
-	m.tokensByHash[arg.TokenHash] = tok
-	m.tokensByID[tok.ID] = tok
-	return tok, nil
-}
-
-func (m *mockUserRepository) GetVerificationTokenByHash(ctx context.Context, tokenHash string) (db.EmailVerificationToken, error) {
-	tok, ok := m.tokensByHash[tokenHash]
-	if !ok {
-		return db.EmailVerificationToken{}, pgx.ErrNoRows
-	}
-	return tok, nil
-}
-
-func (m *mockUserRepository) MarkVerificationTokenUsed(ctx context.Context, id int64) (db.EmailVerificationToken, error) {
-	tok, ok := m.tokensByID[id]
-	if !ok {
-		return db.EmailVerificationToken{}, pgx.ErrNoRows
-	}
-	tok.UsedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
-	m.tokensByID[id] = tok
-	m.tokensByHash[tok.TokenHash] = tok
-	return tok, nil
-}
-
 func (m *mockUserRepository) MarkUserEmailVerified(ctx context.Context, id uuid.UUID) (db.User, error) {
 	u, ok := m.usersByID[id]
 	if !ok {
@@ -129,16 +91,6 @@ func (m *mockUserRepository) MarkUserEmailVerified(ctx context.Context, id uuid.
 	m.usersByID[id] = u
 	m.usersByEmail[u.Email] = u
 	return u, nil
-}
-
-func (m *mockUserRepository) VerifyEmailTx(ctx context.Context, tokenID int64, userID uuid.UUID) error {
-	if _, err := m.MarkVerificationTokenUsed(ctx, tokenID); err != nil {
-		return err
-	}
-	if _, err := m.MarkUserEmailVerified(ctx, userID); err != nil {
-		return err
-	}
-	return nil
 }
 
 type mockEmailSender struct {
@@ -166,8 +118,10 @@ func TestUserService_Register(t *testing.T) {
 	ctx := context.Background()
 	secret := "test-secret"
 	mock := newMockUserRepository()
+	tokenStore := NewMemoryTokenStore(1 * time.Minute)
+	defer tokenStore.Close()
 	mailer := &mockEmailSender{}
-	svc := NewService(mock, mailer, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
+	svc := NewService(mock, tokenStore, mailer, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
 
 	t.Run("Successfully registers customer with valid payload and sends email", func(t *testing.T) {
 		phone := "+1234567890"
@@ -214,17 +168,16 @@ func TestUserService_Register(t *testing.T) {
 			t.Error("expected non-empty verification token in email")
 		}
 
-		// Verify token was stored hashed in repository
-		if len(mock.tokensByHash) != 1 {
-			t.Fatalf("expected 1 token stored, got %d", len(mock.tokensByHash))
-		}
+		// Verify token was stored in memory store
 		expectedHash := hashVerificationToken(sent.Token)
-		tok, exists := mock.tokensByHash[expectedHash]
+		tokenStore.mu.RLock()
+		tokItem, exists := tokenStore.tokens[expectedHash]
+		tokenStore.mu.RUnlock()
 		if !exists {
-			t.Errorf("expected token hash %s to exist in repository", expectedHash)
+			t.Errorf("expected token hash %s to exist in token store", expectedHash)
 		}
-		if tok.UserID != res.ID {
-			t.Errorf("expected token user ID %s, got %s", res.ID, tok.UserID)
+		if tokItem.userID != res.ID {
+			t.Errorf("expected token user ID %s, got %s", res.ID, tokItem.userID)
 		}
 	})
 
@@ -307,8 +260,10 @@ func TestUserService_EmailVerification(t *testing.T) {
 	ctx := context.Background()
 	secret := "test-secret"
 	mock := newMockUserRepository()
+	tokenStore := NewMemoryTokenStore(1 * time.Minute)
+	defer tokenStore.Close()
 	mailer := &mockEmailSender{}
-	svc := NewService(mock, mailer, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
+	svc := NewService(mock, tokenStore, mailer, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
 
 	// Register user
 	regRes, err := svc.Register(ctx, RegisterInput{
@@ -401,7 +356,7 @@ func TestUserService_EmailVerification(t *testing.T) {
 		}
 	})
 
-	t.Run("Expired token is rejected", func(t *testing.T) {
+	t.Run("Expired token is rejected and deleted", func(t *testing.T) {
 		// Register a user with expired token
 		expiredUser, err := mock.Create(ctx, db.CreateUserParams{
 			Email:        "expired@example.com",
@@ -415,14 +370,7 @@ func TestUserService_EmailVerification(t *testing.T) {
 
 		expiredRawToken := "expired-test-token-12345"
 		expiredHash := hashVerificationToken(expiredRawToken)
-		_, err = mock.CreateVerificationToken(ctx, db.CreateEmailVerificationTokenParams{
-			UserID:    expiredUser.ID,
-			TokenHash: expiredHash,
-			ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(-1 * time.Hour), Valid: true},
-		})
-		if err != nil {
-			t.Fatalf("failed to store token: %v", err)
-		}
+		tokenStore.Store(expiredHash, expiredUser.ID, -1*time.Second)
 
 		err = svc.VerifyEmail(ctx, expiredRawToken)
 		if err == nil {
@@ -439,6 +387,100 @@ func TestUserService_EmailVerification(t *testing.T) {
 		if apiErr.Code != "TOKEN_EXPIRED" {
 			t.Errorf("expected code TOKEN_EXPIRED, got %s", apiErr.Code)
 		}
+
+		// Second attempt should report invalid (purged)
+		err = svc.VerifyEmail(ctx, expiredRawToken)
+		if err == nil {
+			t.Fatal("expected error for purged token, got nil")
+		}
+	})
+}
+
+func TestUserService_ResendVerificationEmail(t *testing.T) {
+	ctx := context.Background()
+	secret := "test-secret"
+	mock := newMockUserRepository()
+	tokenStore := NewMemoryTokenStore(1 * time.Minute)
+	defer tokenStore.Close()
+	mailer := &mockEmailSender{}
+	svc := NewService(mock, tokenStore, mailer, nil, secret, 15*time.Minute, 7*24*time.Hour, 5*time.Minute)
+
+	// Register user
+	_, err := svc.Register(ctx, RegisterInput{
+		Email:    "resend@example.com",
+		Password: "ValidPassword123",
+		FullName: "Resend User",
+	})
+	if err != nil {
+		t.Fatalf("failed to register: %v", err)
+	}
+
+	initialToken := mailer.sentEmails[0].Token
+
+	t.Run("Successfully resends verification email and invalidates old token", func(t *testing.T) {
+		err := svc.ResendVerificationEmail(ctx, "resend@example.com")
+		if err != nil {
+			t.Fatalf("unexpected error resending verification: %v", err)
+		}
+
+		if len(mailer.sentEmails) != 2 {
+			t.Fatalf("expected 2 sent emails, got %d", len(mailer.sentEmails))
+		}
+		newToken := mailer.sentEmails[1].Token
+		if newToken == initialToken {
+			t.Error("expected fresh token on resend")
+		}
+
+		// Verify old token was invalidated
+		err = svc.VerifyEmail(ctx, initialToken)
+		if err == nil {
+			t.Error("expected old token to be rejected after resend, got nil")
+		}
+
+		// Verify new token works
+		err = svc.VerifyEmail(ctx, newToken)
+		if err != nil {
+			t.Fatalf("expected new token to verify email: %v", err)
+		}
+	})
+
+	t.Run("Rejects resend when user is already verified", func(t *testing.T) {
+		err := svc.ResendVerificationEmail(ctx, "resend@example.com")
+		if err == nil {
+			t.Fatal("expected error when resending to verified user, got nil")
+		}
+
+		var apiErr *response.AppError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("expected AppError, got %T", err)
+		}
+		if apiErr.StatusCode != 400 {
+			t.Errorf("expected status 400, got %d", apiErr.StatusCode)
+		}
+		if apiErr.Code != "EMAIL_ALREADY_VERIFIED" {
+			t.Errorf("expected code EMAIL_ALREADY_VERIFIED, got %s", apiErr.Code)
+		}
+	})
+
+	t.Run("Non-existent email returns nil (anti-enumeration)", func(t *testing.T) {
+		err := svc.ResendVerificationEmail(ctx, "ghost@example.com")
+		if err != nil {
+			t.Fatalf("expected nil error for anti-enumeration, got %v", err)
+		}
+	})
+
+	t.Run("Invalid email format returns 422", func(t *testing.T) {
+		err := svc.ResendVerificationEmail(ctx, "not-an-email")
+		if err == nil {
+			t.Fatal("expected validation error, got nil")
+		}
+		var apiErr *response.AppError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("expected AppError, got %T", err)
+		}
+		if apiErr.StatusCode != 422 {
+			t.Errorf("expected status 422, got %d", apiErr.StatusCode)
+		}
 	})
 }
 
@@ -446,7 +488,7 @@ func TestUserService_Login(t *testing.T) {
 	ctx := context.Background()
 	secret := "test-secret"
 	mock := newMockUserRepository()
-	svc := NewService(mock, nil, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
+	svc := NewService(mock, nil, nil, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
 
 	// Create user with known password
 	password := "CorrectP@ss123"
@@ -555,7 +597,7 @@ func TestUserService_RefreshToken(t *testing.T) {
 	ctx := context.Background()
 	secret := "test-secret"
 	mock := newMockUserRepository()
-	svc := NewService(mock, nil, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
+	svc := NewService(mock, nil, nil, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
 
 	password := "SecureP@ss123"
 	loginRes, err := svc.Register(ctx, RegisterInput{
@@ -650,7 +692,7 @@ func TestUserService_GetProfile(t *testing.T) {
 	ctx := context.Background()
 	secret := "test-secret"
 	mock := newMockUserRepository()
-	svc := NewService(mock, nil, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
+	svc := NewService(mock, nil, nil, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
 
 	reg, err := svc.Register(ctx, RegisterInput{
 		Email:    "profile@example.com",

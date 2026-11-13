@@ -31,7 +31,7 @@ const (
 
 	DefaultAccessTTL            = 15 * time.Minute
 	DefaultRefreshTTL           = 7 * 24 * time.Hour
-	DefaultVerificationTokenTTL = 24 * time.Hour
+	DefaultVerificationTokenTTL = 5 * time.Minute
 )
 
 // Precomputed dummy bcrypt hash (cost 12) for constant-time password comparisons
@@ -45,10 +45,12 @@ type Service interface {
 	RefreshToken(ctx context.Context, refreshToken string) (*TokenPair, error)
 	GetProfile(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
 	VerifyEmail(ctx context.Context, token string) error
+	ResendVerificationEmail(ctx context.Context, email string) error
 }
 
 type service struct {
 	repo                 Repository
+	tokenStore           TokenStore
 	mailer               email.Sender
 	log                  *zap.Logger
 	jwtSecret            string
@@ -60,11 +62,15 @@ type service struct {
 // NewService constructs an instance of the user service.
 func NewService(
 	repo Repository,
+	tokenStore TokenStore,
 	mailer email.Sender,
 	log *zap.Logger,
 	jwtSecret string,
 	accessTTL, refreshTTL, verificationTokenTTL time.Duration,
 ) Service {
+	if tokenStore == nil {
+		tokenStore = NewMemoryTokenStore(1 * time.Minute)
+	}
 	if mailer == nil {
 		mailer = &email.NoopSender{}
 	}
@@ -82,6 +88,7 @@ func NewService(
 	}
 	return &service{
 		repo:                 repo,
+		tokenStore:           tokenStore,
 		mailer:               mailer,
 		log:                  log,
 		jwtSecret:            jwtSecret,
@@ -92,7 +99,7 @@ func NewService(
 }
 
 // Register handles validation, Bcrypt password hashing (cost 12), database insertion,
-// secure verification token generation, and dispatching verification email.
+// in-memory verification token storage, and dispatching verification email via Brevo.
 func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse, error) {
 	// 1. Sanitize and validate inputs
 	rawEmail := strings.TrimSpace(in.Email)
@@ -160,25 +167,18 @@ func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse
 		return nil, response.NewInternalError(errors.New("failed to register user"))
 	}
 
-	// 5. Generate secure verification token and store its SHA-256 hash
+	// 5. Generate secure verification token and store in memory (deleted automatically after expired)
 	rawToken, tokenHash, err := generateVerificationToken()
 	if err != nil {
 		s.log.Error("failed to generate email verification token", zap.Error(err), zap.String("user_id", u.ID.String()))
 	} else {
-		expiresAt := time.Now().Add(s.verificationTokenTTL)
-		_, err = s.repo.CreateVerificationToken(ctx, db.CreateEmailVerificationTokenParams{
-			UserID:    u.ID,
-			TokenHash: tokenHash,
-			ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
-		})
-		if err != nil {
-			s.log.Error("failed to store email verification token", zap.Error(err), zap.String("user_id", u.ID.String()))
-		} else {
-			// 6. Deliver verification email via Brevo
-			// Sensitive token is passed to email transport, NEVER logged in application logs
-			if err := s.mailer.SendVerificationEmail(ctx, u.Email, u.FullName, rawToken); err != nil {
-				s.log.Error("failed to dispatch verification email", zap.Error(err), zap.String("user_id", u.ID.String()))
-			}
+		// Store in memory with expiration TTL
+		s.tokenStore.Store(tokenHash, u.ID, s.verificationTokenTTL)
+
+		// 6. Deliver verification email via Brevo
+		// Sensitive token is passed to email transport, NEVER logged in application logs
+		if err := s.mailer.SendVerificationEmail(ctx, u.Email, u.FullName, rawToken); err != nil {
+			s.log.Error("failed to dispatch verification email", zap.Error(err), zap.String("user_id", u.ID.String()))
 		}
 	}
 
@@ -287,7 +287,7 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 	return GenerateTokenPair(u.ID, u.Email, u.Role, s.jwtSecret, s.accessTTL, s.refreshTTL)
 }
 
-// VerifyEmail validates the submitted verification token and marks user email as verified.
+// VerifyEmail validates the submitted verification token from memory and marks user email as verified.
 func (s *service) VerifyEmail(ctx context.Context, rawToken string) error {
 	rawToken = strings.TrimSpace(rawToken)
 	if rawToken == "" {
@@ -296,29 +296,77 @@ func (s *service) VerifyEmail(ctx context.Context, rawToken string) error {
 
 	tokenHash := hashVerificationToken(rawToken)
 
-	record, err := s.repo.GetVerificationTokenByHash(ctx, tokenHash)
+	userID, err := s.tokenStore.ValidateAndConsume(tokenHash)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		switch {
+		case errors.Is(err, ErrTokenNotFound):
+			return response.NewBadRequestError("INVALID_TOKEN", "invalid verification token")
+		case errors.Is(err, ErrTokenExpired):
+			return response.NewBadRequestError("TOKEN_EXPIRED", "verification token has expired")
+		case errors.Is(err, ErrTokenAlreadyUsed):
+			return response.NewBadRequestError("TOKEN_ALREADY_USED", "verification token has already been used")
+		default:
 			return response.NewBadRequestError("INVALID_TOKEN", "invalid verification token")
 		}
-		s.log.Error("database query failed for verification token", zap.Error(err))
+	}
+
+	if _, err := s.repo.MarkUserEmailVerified(ctx, userID); err != nil {
+		s.log.Error("failed to mark email as verified", zap.Error(err), zap.String("user_id", userID.String()))
 		return response.NewInternalError(errors.New("failed to verify email"))
 	}
 
-	if record.UsedAt.Valid {
-		return response.NewBadRequestError("TOKEN_ALREADY_USED", "verification token has already been used")
+	s.log.Info("email verified successfully", zap.String("user_id", userID.String()))
+	return nil
+}
+
+// ResendVerificationEmail sends a fresh verification token to an unverified user's email.
+func (s *service) ResendVerificationEmail(ctx context.Context, rawEmail string) error {
+	rawEmail = strings.TrimSpace(rawEmail)
+	if rawEmail == "" {
+		return response.NewValidationError("validation failed", []response.FieldError{
+			{Field: "email", Message: "email is required"},
+		})
 	}
 
-	if !record.ExpiresAt.Valid || record.ExpiresAt.Time.Before(time.Now()) {
-		return response.NewBadRequestError("TOKEN_EXPIRED", "verification token has expired")
+	parsedAddr, err := mail.ParseAddress(rawEmail)
+	if err != nil || parsedAddr.Address != rawEmail {
+		return response.NewValidationError("validation failed", []response.FieldError{
+			{Field: "email", Message: "invalid email format"},
+		})
+	}
+	emailAddr := strings.ToLower(parsedAddr.Address)
+
+	u, err := s.repo.GetByEmail(ctx, emailAddr)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Anti-enumeration: return nil without error so malicious callers cannot probe user registration status
+			return nil
+		}
+		s.log.Error("failed to look up user for verification resend", zap.Error(err))
+		return response.NewInternalError(errors.New("failed to process verification resend"))
 	}
 
-	if err := s.repo.VerifyEmailTx(ctx, record.ID, record.UserID); err != nil {
-		s.log.Error("failed to mark email as verified", zap.Error(err), zap.String("user_id", record.UserID.String()))
-		return response.NewInternalError(errors.New("failed to verify email"))
+	if u.EmailVerified {
+		return response.NewBadRequestError("EMAIL_ALREADY_VERIFIED", "this email address is already verified")
 	}
 
-	s.log.Info("email verified successfully", zap.String("user_id", record.UserID.String()))
+	// Invalidate any older pending tokens for this user
+	s.tokenStore.DeleteByUserID(u.ID)
+
+	// Generate fresh token
+	rawToken, tokenHash, err := generateVerificationToken()
+	if err != nil {
+		s.log.Error("failed to generate email verification token", zap.Error(err), zap.String("user_id", u.ID.String()))
+		return response.NewInternalError(errors.New("failed to generate verification token"))
+	}
+
+	s.tokenStore.Store(tokenHash, u.ID, s.verificationTokenTTL)
+
+	if err := s.mailer.SendVerificationEmail(ctx, u.Email, u.FullName, rawToken); err != nil {
+		s.log.Error("failed to dispatch verification email", zap.Error(err), zap.String("user_id", u.ID.String()))
+	}
+
+	s.log.Info("verification email resent", zap.String("user_id", u.ID.String()))
 	return nil
 }
 

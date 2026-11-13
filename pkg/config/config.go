@@ -84,7 +84,7 @@ func LoadConfig() (*Config, error) {
 	brevoAPIKey := getEnv("BREVO_API_KEY", "")
 	brevoFromEmail := getEnv("BREVO_FROM_EMAIL", "olivergot26@gmail.com")
 	brevoFromName := getEnv("BREVO_FROM_NAME", "WAAP")
-	verificationTokenTTL := getEnvAsDuration("VERIFICATION_TOKEN_TTL", 24*time.Hour)
+	verificationTokenTTL := getEnvAsDuration("VERIFICATION_TOKEN_TTL", 5*time.Minute)
 
 	jwtSecret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	if jwtSecret == "" {

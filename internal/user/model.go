@@ -68,6 +68,11 @@ type VerifyEmailResponse struct {
 	Message string `json:"message"`
 }
 
+// ResendVerificationInput models the payload to resend email verification.
+type ResendVerificationInput struct {
+	Email string `json:"email" binding:"required"`
+}
+
 // LoginInput models the login request credentials.
 type LoginInput struct {
 	Email    string `json:"email"`

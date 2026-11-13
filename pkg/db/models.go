@@ -50,15 +50,6 @@ type Category struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type EmailVerificationToken struct {
-	ID        int64              `json:"id"`
-	UserID    uuid.UUID          `json:"user_id"`
-	TokenHash string             `json:"token_hash"`
-	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
-	UsedAt    pgtype.Timestamptz `json:"used_at"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
 type Order struct {
 	ID                      int64              `json:"id"`
 	OrderNumber             string             `json:"order_number"`
@@ -144,7 +135,7 @@ type User struct {
 	Role          string             `json:"role"`
 	PhoneNumber   pgtype.Text        `json:"phone_number"`
 	IsActive      bool               `json:"is_active"`
+	EmailVerified bool               `json:"email_verified"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	EmailVerified bool               `json:"email_verified"`
 }

@@ -30,7 +30,6 @@ func AutoMigrate(ctx context.Context, pool *pgxpool.Pool) error {
 		file    string
 	}{
 		{version: "000001_init_schema", file: "000001_init_schema.up.sql"},
-		{version: "000002_add_email_verification", file: "000002_add_email_verification.up.sql"},
 	}
 
 	for _, m := range migrations {
