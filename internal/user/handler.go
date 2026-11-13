@@ -128,6 +128,33 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 	})
 }
 
+// ResendVerification godoc
+// @Summary Resend verification email for an unverified account
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body ResendVerificationInput true "Resend Verification Payload"
+// @Success 200 {object} response.Envelope{data=VerifyEmailResponse}
+// @Failure 400 {object} response.Envelope{error=response.APIError}
+// @Failure 422 {object} response.Envelope{error=response.APIError}
+// @Router /auth/resend-verification [post]
+func (h *Handler) ResendVerification(c *gin.Context) {
+	var in ResendVerificationInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.BadRequest(c, "INVALID_REQUEST_BODY", "malformed or missing JSON request body: email is required")
+		return
+	}
+
+	if err := h.service.ResendVerificationEmail(c.Request.Context(), in.Email); err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.OK(c, VerifyEmailResponse{
+		Message: "verification email sent",
+	})
+}
+
 // GetProfile godoc
 // @Summary Get current user profile
 // @Tags Users

@@ -34,6 +34,14 @@ func TestRegister_Routes(t *testing.T) {
 			t.Errorf("expected 200 OK for /swagger/index.html, got %d", wSwagger.Code)
 		}
 
+		// Test Swagger convenience redirect from /api/v1/swagger/index.html
+		reqSwaggerRedirect, _ := http.NewRequest(http.MethodGet, "/api/v1/swagger/index.html", nil)
+		wSwaggerRedirect := httptest.NewRecorder()
+		r.ServeHTTP(wSwaggerRedirect, reqSwaggerRedirect)
+		if wSwaggerRedirect.Code != http.StatusMovedPermanently {
+			t.Errorf("expected 301 Moved Permanently for /api/v1/swagger/index.html, got %d", wSwaggerRedirect.Code)
+		}
+
 		// Test Healthz route (nil pool returns 503)
 		reqHealth, _ := http.NewRequest(http.MethodGet, "/healthz", nil)
 		wHealth := httptest.NewRecorder()

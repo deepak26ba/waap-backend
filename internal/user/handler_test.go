@@ -16,11 +16,12 @@ import (
 )
 
 type mockAuthService struct {
-	registerFunc     func(ctx context.Context, in RegisterInput) (*UserResponse, error)
-	loginFunc        func(ctx context.Context, in LoginInput) (*LoginResponse, error)
-	refreshTokenFunc func(ctx context.Context, refreshToken string) (*TokenPair, error)
-	getProfileFunc   func(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
-	verifyEmailFunc  func(ctx context.Context, token string) error
+	registerFunc           func(ctx context.Context, in RegisterInput) (*UserResponse, error)
+	loginFunc              func(ctx context.Context, in LoginInput) (*LoginResponse, error)
+	refreshTokenFunc       func(ctx context.Context, refreshToken string) (*TokenPair, error)
+	getProfileFunc         func(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
+	verifyEmailFunc        func(ctx context.Context, token string) error
+	resendVerificationFunc func(ctx context.Context, email string) error
 }
 
 func (m *mockAuthService) Register(ctx context.Context, in RegisterInput) (*UserResponse, error) {
@@ -58,6 +59,13 @@ func (m *mockAuthService) VerifyEmail(ctx context.Context, token string) error {
 	return nil
 }
 
+func (m *mockAuthService) ResendVerificationEmail(ctx context.Context, email string) error {
+	if m.resendVerificationFunc != nil {
+		return m.resendVerificationFunc(ctx, email)
+	}
+	return nil
+}
+
 func setupTestRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -66,6 +74,7 @@ func setupTestRouter(h *Handler) *gin.Engine {
 	rg.POST("/login", h.Login)
 	rg.POST("/refresh", h.Refresh)
 	rg.POST("/verify-email", h.VerifyEmail)
+	rg.POST("/resend-verification", h.ResendVerification)
 	return r
 }
 
@@ -360,6 +369,77 @@ func TestAuthHandler_VerifyEmail(t *testing.T) {
 
 		body := []byte(`{"token":"reused-token"}`)
 		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request, got %d", w.Code)
+		}
+	})
+}
+
+func TestAuthHandler_ResendVerification(t *testing.T) {
+	t.Run("Valid request returns 200 OK", func(t *testing.T) {
+		svc := &mockAuthService{
+			resendVerificationFunc: func(ctx context.Context, email string) error {
+				if email != "user@example.com" {
+					return response.NewValidationError("validation failed", []response.FieldError{{Field: "email", Message: "invalid"}})
+				}
+				return nil
+			},
+		}
+		h := NewHandler(svc, nil)
+		r := setupTestRouter(h)
+
+		body := []byte(`{"email":"user@example.com"}`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/resend-verification", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var env response.Envelope
+		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+			t.Fatalf("failed to decode response envelope: %v", err)
+		}
+		if !env.Success {
+			t.Errorf("expected success to be true")
+		}
+	})
+
+	t.Run("Missing or malformed JSON returns 400 Bad Request", func(t *testing.T) {
+		h := NewHandler(&mockAuthService{}, nil)
+		r := setupTestRouter(h)
+
+		body := []byte(`{}`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/resend-verification", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request, got %d", w.Code)
+		}
+	})
+
+	t.Run("Already verified returns 400 Bad Request", func(t *testing.T) {
+		svc := &mockAuthService{
+			resendVerificationFunc: func(ctx context.Context, email string) error {
+				return response.NewBadRequestError("EMAIL_ALREADY_VERIFIED", "already verified")
+			},
+		}
+		h := NewHandler(svc, nil)
+		r := setupTestRouter(h)
+
+		body := []byte(`{"email":"verified@example.com"}`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/resend-verification", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 

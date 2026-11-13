@@ -15,6 +15,7 @@ CREATE TABLE users (
     role VARCHAR(30) NOT NULL DEFAULT 'customer', -- 'customer', 'admin'
     phone_number VARCHAR(30),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

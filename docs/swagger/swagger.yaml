@@ -143,6 +143,13 @@ definitions:
       phone_number:
         type: string
     type: object
+  user.ResendVerificationInput:
+    properties:
+      email:
+        type: string
+    required:
+    - email
+    type: object
   user.TokenPair:
     properties:
       access_token:
@@ -338,6 +345,50 @@ paths:
                   $ref: '#/definitions/response.APIError'
               type: object
       summary: Register a new customer account
+      tags:
+      - Auth
+  /auth/resend-verification:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Resend Verification Payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/user.ResendVerificationInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/user.VerifyEmailResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.APIError'
+              type: object
+      summary: Resend verification email for an unverified account
       tags:
       - Auth
   /auth/verify-email:

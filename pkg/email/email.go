@@ -84,7 +84,7 @@ func (s *BrevoSender) SendVerificationEmail(ctx context.Context, toEmail, toName
   <div style="background-color: #f4f6f8; border: 1px solid #e1e4e8; border-radius: 6px; padding: 16px; margin: 20px 0; font-family: monospace; font-size: 16px; font-weight: bold; text-align: center; letter-spacing: 1px; word-break: break-all;">
     %s
   </div>
-  <p>Submit this token to the verification endpoint to complete your registration. This token will expire in 24 hours.</p>
+  <p>Submit this token to the verification endpoint to complete your registration. This token will expire in 5 minutes.</p>
   <p>If you did not request this email, please ignore it.</p>
   <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
   <p style="font-size: 12px; color: #777;">&copy; WAAP E-Commerce Platform. All rights reserved.</p>
@@ -141,4 +141,3 @@ type NoopSender struct{}
 func (n *NoopSender) SendVerificationEmail(ctx context.Context, toEmail, toName, token string) error {
 	return nil
 }
-
