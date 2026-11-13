@@ -13,8 +13,7 @@ func TestCartHandler_GetCart(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewHandler(&mockCartService{}, nil)
 	r := gin.New()
-	rg := r.Group("/cart")
-	h.RegisterRoutes(rg)
+	r.GET("/cart", h.GetCart)
 
 	req, _ := http.NewRequest(http.MethodGet, "/cart", nil)
 	w := httptest.NewRecorder()

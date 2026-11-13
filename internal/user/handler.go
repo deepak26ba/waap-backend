@@ -22,23 +22,6 @@ func NewHandler(service Service, log *zap.Logger) *Handler {
 	}
 }
 
-// RegisterRoutes registers public auth endpoints on the provided router group.
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
-	h.RegisterAuthRoutes(rg)
-}
-
-// RegisterAuthRoutes registers public authentication endpoints on the provided router group.
-func (h *Handler) RegisterAuthRoutes(rg *gin.RouterGroup) {
-	rg.POST("/register", h.Register)
-	rg.POST("/login", h.Login)
-	rg.POST("/refresh", h.Refresh)
-}
-
-// RegisterProfileRoutes registers authenticated profile endpoints on the provided router group.
-func (h *Handler) RegisterProfileRoutes(rg *gin.RouterGroup) {
-	rg.GET("/me", h.GetProfile)
-}
-
 // Register godoc
 // @Summary Register a new customer account
 // @Tags Auth

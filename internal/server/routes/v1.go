@@ -36,26 +36,39 @@ func RegisterV1(r *gin.Engine, deps Dependencies) {
 	apiV1 := r.Group("/api/v1")
 	{
 		// Public Authentication Routes
-		authGroup := apiV1.Group("/auth")
-		userHandler.RegisterAuthRoutes(authGroup)
+		auth := apiV1.Group("/auth")
+		{
+			auth.POST("/register", userHandler.Register)
+			auth.POST("/login", userHandler.Login)
+			auth.POST("/refresh", userHandler.Refresh)
+		}
 
 		// Public Product Catalog Routes
-		catalogGroup := apiV1.Group("/catalog")
-		productHandler.RegisterRoutes(catalogGroup)
+		catalog := apiV1.Group("/catalog")
+		{
+			catalog.GET("/categories", productHandler.ListCategories)
+			catalog.GET("/products/:id", productHandler.GetProduct)
+		}
 
 		// Shopping Cart Routes
 		cartGroup := apiV1.Group("/cart")
-		cartHandler.RegisterRoutes(cartGroup)
+		{
+			cartGroup.GET("", cartHandler.GetCart)
+		}
 
 		// Authenticated Customer Profile Routes
-		usersGroup := apiV1.Group("/users")
-		usersGroup.Use(middleware.RequireAuth(jwtSecret))
-		userHandler.RegisterProfileRoutes(usersGroup)
+		users := apiV1.Group("/users")
+		users.Use(middleware.RequireAuth(jwtSecret))
+		{
+			users.GET("/me", userHandler.GetProfile)
+		}
 
 		// Protected Admin Routes
-		adminGroup := apiV1.Group("/admin")
-		adminGroup.Use(middleware.RequireAuth(jwtSecret), middleware.RequireAdmin())
-		RegisterAdminRoutes(adminGroup)
+		admin := apiV1.Group("/admin")
+		admin.Use(middleware.RequireAuth(jwtSecret), middleware.RequireAdmin())
+		{
+			admin.GET("/ping", adminPingHandler)
+		}
 	}
 }
 

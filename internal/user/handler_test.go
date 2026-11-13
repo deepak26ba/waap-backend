@@ -54,7 +54,9 @@ func setupTestRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	rg := r.Group("/auth")
-	h.RegisterRoutes(rg)
+	rg.POST("/register", h.Register)
+	rg.POST("/login", h.Login)
+	rg.POST("/refresh", h.Refresh)
 	return r
 }
 
