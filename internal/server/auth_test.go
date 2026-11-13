@@ -132,4 +132,3 @@ func TestAuthRouter_RBACProtection(t *testing.T) {
 		}
 	})
 }
-
