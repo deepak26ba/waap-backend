@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
-	"waap-backend/internal/config"
+	"waap-backend/pkg/config"
 	"waap-backend/pkg/db"
 )
 

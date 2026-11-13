@@ -111,56 +111,40 @@ func LoadConfig() (*Config, error) {
 }
 
 func getEnv(key, defaultVal string) string {
-	if val := os.Getenv(key); val != "" {
+	if val, exists := os.LookupEnv(key); exists && val != "" {
 		return val
 	}
 	return defaultVal
 }
 
 func getEnvAsInt(key string, defaultVal int) int {
-	valStr := os.Getenv(key)
-	if valStr == "" {
-		return defaultVal
+	valStr := getEnv(key, "")
+	if val, err := strconv.Atoi(valStr); err == nil {
+		return val
 	}
-	val, err := strconv.Atoi(valStr)
-	if err != nil {
-		return defaultVal
-	}
-	return val
+	return defaultVal
 }
 
 func getEnvAsFloat(key string, defaultVal float64) float64 {
-	valStr := os.Getenv(key)
-	if valStr == "" {
-		return defaultVal
+	valStr := getEnv(key, "")
+	if val, err := strconv.ParseFloat(valStr, 64); err == nil {
+		return val
 	}
-	val, err := strconv.ParseFloat(valStr, 64)
-	if err != nil {
-		return defaultVal
-	}
-	return val
+	return defaultVal
 }
 
 func getEnvAsBool(key string, defaultVal bool) bool {
-	valStr := os.Getenv(key)
-	if valStr == "" {
-		return defaultVal
+	valStr := getEnv(key, "")
+	if val, err := strconv.ParseBool(valStr); err == nil {
+		return val
 	}
-	b, err := strconv.ParseBool(valStr)
-	if err != nil {
-		return defaultVal
-	}
-	return b
+	return defaultVal
 }
 
 func getEnvAsDuration(key string, defaultVal time.Duration) time.Duration {
-	valStr := os.Getenv(key)
-	if valStr == "" {
-		return defaultVal
+	valStr := getEnv(key, "")
+	if val, err := time.ParseDuration(valStr); err == nil {
+		return val
 	}
-	d, err := time.ParseDuration(valStr)
-	if err != nil {
-		return defaultVal
-	}
-	return d
+	return defaultVal
 }

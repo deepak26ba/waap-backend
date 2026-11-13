@@ -5,7 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"waap-backend/internal/auth"
+	"waap-backend/internal/model"
+	"waap-backend/internal/service"
 	"waap-backend/pkg/response"
 )
 
@@ -37,13 +38,13 @@ func RequireAuth(jwtSecret string) gin.HandlerFunc {
 			return
 		}
 
-		claims, err := auth.ValidateToken(tokenStr, jwtSecret)
+		claims, err := service.ValidateToken(tokenStr, jwtSecret)
 		if err != nil {
 			response.Unauthorized(c, response.ErrCodeUnauthorized, "invalid or expired token")
 			return
 		}
 
-		if claims.TokenType != auth.TokenTypeAccess {
+		if claims.TokenType != model.TokenTypeAccess {
 			response.Unauthorized(c, response.ErrCodeUnauthorized, "access token required, refresh token is not permitted for authentication")
 			return
 		}
@@ -98,18 +99,9 @@ func GetUserID(c *gin.Context) (int64, bool) {
 	if !exists {
 		return 0, false
 	}
+
 	id, ok := val.(int64)
 	return id, ok
-}
-
-// GetUserRole retrieves the authenticated user's role from the context.
-func GetUserRole(c *gin.Context) (string, bool) {
-	val, exists := c.Get(ContextUserRole)
-	if !exists {
-		return "", false
-	}
-	role, ok := val.(string)
-	return role, ok
 }
 
 // GetUserEmail retrieves the authenticated user's email from the context.
@@ -118,6 +110,29 @@ func GetUserEmail(c *gin.Context) (string, bool) {
 	if !exists {
 		return "", false
 	}
+
 	email, ok := val.(string)
 	return email, ok
+}
+
+// GetUserRole retrieves the authenticated user's role from the context.
+func GetUserRole(c *gin.Context) (string, bool) {
+	val, exists := c.Get(ContextUserRole)
+	if !exists {
+		return "", false
+	}
+
+	role, ok := val.(string)
+	return role, ok
+}
+
+// GetClaims retrieves the full Claims pointer from the context.
+func GetClaims(c *gin.Context) (*model.Claims, bool) {
+	val, exists := c.Get(ContextClaims)
+	if !exists {
+		return nil, false
+	}
+
+	claims, ok := val.(*model.Claims)
+	return claims, ok
 }

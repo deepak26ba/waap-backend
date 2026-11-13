@@ -13,9 +13,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
-	"waap-backend/internal/auth"
-	"waap-backend/internal/config"
+	"waap-backend/internal/handler"
 	"waap-backend/internal/middleware"
+	"waap-backend/internal/model"
+	"waap-backend/internal/repository"
+	"waap-backend/internal/service"
+	"waap-backend/pkg/config"
 	"waap-backend/pkg/db"
 	"waap-backend/pkg/response"
 )
@@ -108,11 +111,14 @@ func registerAPIRoutes(r *gin.Engine, cfg *config.Config, queries *db.Queries, l
 		jwtSecret = "dev-insecure-secret-key-change-in-production-32b"
 	}
 
+	// Wire layered components: Repository -> Service -> Handler
+	repos := repository.NewRepositories(queries)
+	authService := service.NewAuthService(repos.Users, jwtSecret, 15*time.Minute, 7*24*time.Hour)
+	authHandler := handler.NewAuthHandler(authService, log)
+
 	apiV1 := r.Group("/api/v1")
 	{
 		// 1. Auth routes (public)
-		authService := auth.NewService(queries, jwtSecret, 15*time.Minute, 7*24*time.Hour)
-		authHandler := auth.NewHandler(authService, log)
 		authGroup := apiV1.Group("/auth")
 		authHandler.RegisterRoutes(authGroup)
 
@@ -140,7 +146,7 @@ func registerAPIRoutes(r *gin.Engine, cfg *config.Config, queries *db.Queries, l
 					p := user.PhoneNumber.String
 					phone = &p
 				}
-				response.OK(c, auth.UserResponse{
+				response.OK(c, model.UserResponse{
 					ID:          user.ID,
 					Email:       user.Email,
 					FullName:    user.FullName,

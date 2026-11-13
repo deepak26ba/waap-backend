@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"waap-backend/internal/config"
+	"waap-backend/pkg/config"
 	"waap-backend/pkg/db"
 	"waap-backend/pkg/response"
 )
