@@ -28,7 +28,7 @@ func NewHandler(service Service, log *zap.Logger) *Handler {
 // @Accept json
 // @Produce json
 // @Param request body RegisterInput true "Registration Payload"
-// @Success 201 {object} response.Envelope{data=UserResponse}
+// @Success 201 {object} response.Envelope{data=RegisterResponse}
 // @Failure 400 {object} response.Envelope{error=response.APIError}
 // @Failure 409 {object} response.Envelope{error=response.APIError}
 // @Failure 422 {object} response.Envelope{error=response.APIError}
@@ -102,23 +102,24 @@ func (h *Handler) Refresh(c *gin.Context) {
 }
 
 // VerifyEmail godoc
-// @Summary Verify user email address with verification token
+// @Summary Verify user email address with 6-digit OTP
 // @Tags Auth
 // @Accept json
 // @Produce json
-// @Param request body VerifyEmailInput true "Email Verification Payload"
+// @Param request body VerifyEmailInput true "Email Verification Payload with OTP"
 // @Success 200 {object} response.Envelope{data=VerifyEmailResponse}
 // @Failure 400 {object} response.Envelope{error=response.APIError}
+// @Failure 422 {object} response.Envelope{error=response.APIError}
 // @Failure 500 {object} response.Envelope{error=response.APIError}
 // @Router /auth/verify-email [post]
 func (h *Handler) VerifyEmail(c *gin.Context) {
 	var in VerifyEmailInput
 	if err := c.ShouldBindJSON(&in); err != nil {
-		response.BadRequest(c, "INVALID_REQUEST_BODY", "malformed or missing JSON request body: token is required")
+		response.BadRequest(c, "INVALID_REQUEST_BODY", "malformed or missing JSON request body: email and otp are required")
 		return
 	}
 
-	if err := h.service.VerifyEmail(c.Request.Context(), in.Token); err != nil {
+	if err := h.service.VerifyEmail(c.Request.Context(), in.Email, in.OTP); err != nil {
 		response.HandleError(c, err)
 		return
 	}
@@ -129,7 +130,7 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 }
 
 // ResendVerification godoc
-// @Summary Resend verification email for an unverified account
+// @Summary Resend verification email with a fresh OTP for an unverified account
 // @Tags Auth
 // @Accept json
 // @Produce json
@@ -151,7 +152,7 @@ func (h *Handler) ResendVerification(c *gin.Context) {
 	}
 
 	response.OK(c, VerifyEmailResponse{
-		Message: "verification email sent",
+		Message: "verification OTP sent",
 	})
 }
 

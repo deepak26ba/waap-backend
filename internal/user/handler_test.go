@@ -16,15 +16,15 @@ import (
 )
 
 type mockAuthService struct {
-	registerFunc           func(ctx context.Context, in RegisterInput) (*UserResponse, error)
+	registerFunc           func(ctx context.Context, in RegisterInput) (*RegisterResponse, error)
 	loginFunc              func(ctx context.Context, in LoginInput) (*LoginResponse, error)
 	refreshTokenFunc       func(ctx context.Context, refreshToken string) (*TokenPair, error)
 	getProfileFunc         func(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
-	verifyEmailFunc        func(ctx context.Context, token string) error
+	verifyEmailFunc        func(ctx context.Context, email, otp string) error
 	resendVerificationFunc func(ctx context.Context, email string) error
 }
 
-func (m *mockAuthService) Register(ctx context.Context, in RegisterInput) (*UserResponse, error) {
+func (m *mockAuthService) Register(ctx context.Context, in RegisterInput) (*RegisterResponse, error) {
 	if m.registerFunc != nil {
 		return m.registerFunc(ctx, in)
 	}
@@ -52,9 +52,9 @@ func (m *mockAuthService) GetProfile(ctx context.Context, userID uuid.UUID) (*Us
 	return nil, nil
 }
 
-func (m *mockAuthService) VerifyEmail(ctx context.Context, token string) error {
+func (m *mockAuthService) VerifyEmail(ctx context.Context, email, otp string) error {
 	if m.verifyEmailFunc != nil {
-		return m.verifyEmailFunc(ctx, token)
+		return m.verifyEmailFunc(ctx, email, otp)
 	}
 	return nil
 }
@@ -81,13 +81,16 @@ func setupTestRouter(h *Handler) *gin.Engine {
 func TestAuthHandler_Register(t *testing.T) {
 	t.Run("Valid registration returns 201 Created", func(t *testing.T) {
 		svc := &mockAuthService{
-			registerFunc: func(ctx context.Context, in RegisterInput) (*UserResponse, error) {
-				return &UserResponse{
-					ID:        uuid.Must(uuid.NewV4()),
-					Email:     in.Email,
-					FullName:  in.FullName,
-					Role:      "customer",
-					CreatedAt: time.Now(),
+			registerFunc: func(ctx context.Context, in RegisterInput) (*RegisterResponse, error) {
+				return &RegisterResponse{
+					Message: "Registration successful. Please enter the OTP sent to your email to activate your account.",
+					User: UserResponse{
+						ID:        uuid.Must(uuid.NewV4()),
+						Email:     in.Email,
+						FullName:  in.FullName,
+						Role:      "customer",
+						CreatedAt: time.Now(),
+					},
 				}, nil
 			},
 		}
@@ -132,7 +135,7 @@ func TestAuthHandler_Register(t *testing.T) {
 
 	t.Run("Service conflict returns 409 Conflict", func(t *testing.T) {
 		svc := &mockAuthService{
-			registerFunc: func(ctx context.Context, in RegisterInput) (*UserResponse, error) {
+			registerFunc: func(ctx context.Context, in RegisterInput) (*RegisterResponse, error) {
 				return nil, response.NewConflictError("EMAIL_ALREADY_EXISTS", "user exists")
 			},
 		}
@@ -268,11 +271,11 @@ func TestAuthHandler_RefreshToken(t *testing.T) {
 }
 
 func TestAuthHandler_VerifyEmail(t *testing.T) {
-	t.Run("Valid token returns 200 OK", func(t *testing.T) {
+	t.Run("Valid OTP and email returns 200 OK", func(t *testing.T) {
 		svc := &mockAuthService{
-			verifyEmailFunc: func(ctx context.Context, token string) error {
-				if token != "valid-token-123" {
-					return response.NewBadRequestError("INVALID_TOKEN", "invalid verification token")
+			verifyEmailFunc: func(ctx context.Context, email, otp string) error {
+				if email != "test@example.com" || otp != "123456" {
+					return response.NewBadRequestError("INVALID_OTP", "invalid verification otp")
 				}
 				return nil
 			},
@@ -280,7 +283,7 @@ func TestAuthHandler_VerifyEmail(t *testing.T) {
 		h := NewHandler(svc, nil)
 		r := setupTestRouter(h)
 
-		body := []byte(`{"token":"valid-token-123"}`)
+		body := []byte(`{"email":"test@example.com","otp":"123456"}`)
 		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -300,11 +303,11 @@ func TestAuthHandler_VerifyEmail(t *testing.T) {
 		}
 	})
 
-	t.Run("Missing or empty token returns 400 Bad Request", func(t *testing.T) {
+	t.Run("Missing or empty otp returns 400 Bad Request", func(t *testing.T) {
 		h := NewHandler(&mockAuthService{}, nil)
 		r := setupTestRouter(h)
 
-		body := []byte(`{}`)
+		body := []byte(`{"email":"test@example.com"}`)
 		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -316,16 +319,11 @@ func TestAuthHandler_VerifyEmail(t *testing.T) {
 		}
 	})
 
-	t.Run("Invalid token returns 400 Bad Request with error envelope", func(t *testing.T) {
-		svc := &mockAuthService{
-			verifyEmailFunc: func(ctx context.Context, token string) error {
-				return response.NewBadRequestError("INVALID_TOKEN", "invalid verification token")
-			},
-		}
-		h := NewHandler(svc, nil)
+	t.Run("Missing or empty email returns 400 Bad Request", func(t *testing.T) {
+		h := NewHandler(&mockAuthService{}, nil)
 		r := setupTestRouter(h)
 
-		body := []byte(`{"token":"invalid-token"}`)
+		body := []byte(`{"otp":"123456"}`)
 		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -337,16 +335,16 @@ func TestAuthHandler_VerifyEmail(t *testing.T) {
 		}
 	})
 
-	t.Run("Expired token returns 400 Bad Request", func(t *testing.T) {
+	t.Run("Invalid otp returns 400 Bad Request with error envelope", func(t *testing.T) {
 		svc := &mockAuthService{
-			verifyEmailFunc: func(ctx context.Context, token string) error {
-				return response.NewBadRequestError("TOKEN_EXPIRED", "verification token has expired")
+			verifyEmailFunc: func(ctx context.Context, email, otp string) error {
+				return response.NewBadRequestError("INVALID_OTP", "invalid verification otp")
 			},
 		}
 		h := NewHandler(svc, nil)
 		r := setupTestRouter(h)
 
-		body := []byte(`{"token":"expired-token"}`)
+		body := []byte(`{"email":"test@example.com","otp":"000000"}`)
 		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -358,16 +356,58 @@ func TestAuthHandler_VerifyEmail(t *testing.T) {
 		}
 	})
 
-	t.Run("Already used token returns 400 Bad Request", func(t *testing.T) {
+	t.Run("Mismatched email returns 400 Bad Request", func(t *testing.T) {
 		svc := &mockAuthService{
-			verifyEmailFunc: func(ctx context.Context, token string) error {
-				return response.NewBadRequestError("TOKEN_ALREADY_USED", "token already used")
+			verifyEmailFunc: func(ctx context.Context, email, otp string) error {
+				return response.NewBadRequestError("INVALID_OTP", "verification otp does not match the provided email address")
 			},
 		}
 		h := NewHandler(svc, nil)
 		r := setupTestRouter(h)
 
-		body := []byte(`{"token":"reused-token"}`)
+		body := []byte(`{"email":"other@example.com","otp":"123456"}`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request, got %d", w.Code)
+		}
+	})
+
+	t.Run("Expired otp returns 400 Bad Request", func(t *testing.T) {
+		svc := &mockAuthService{
+			verifyEmailFunc: func(ctx context.Context, email, otp string) error {
+				return response.NewBadRequestError("OTP_EXPIRED", "verification otp has expired")
+			},
+		}
+		h := NewHandler(svc, nil)
+		r := setupTestRouter(h)
+
+		body := []byte(`{"email":"test@example.com","otp":"123456"}`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request, got %d", w.Code)
+		}
+	})
+
+	t.Run("Already used otp returns 400 Bad Request", func(t *testing.T) {
+		svc := &mockAuthService{
+			verifyEmailFunc: func(ctx context.Context, email, otp string) error {
+				return response.NewBadRequestError("OTP_ALREADY_USED", "verification otp has already been used")
+			},
+		}
+		h := NewHandler(svc, nil)
+		r := setupTestRouter(h)
+
+		body := []byte(`{"email":"test@example.com","otp":"123456"}`)
 		req, _ := http.NewRequest(http.MethodPost, "/auth/verify-email", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()

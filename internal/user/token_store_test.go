@@ -59,7 +59,7 @@ func TestMemoryTokenStore(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	store.mu.RLock()
-	_, exists := store.tokens[cleanupHash]
+	_, exists := store.otps[cleanupHash]
 	store.mu.RUnlock()
 
 	if exists {

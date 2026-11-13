@@ -26,7 +26,7 @@ func TestBrevoSender_Success(t *testing.T) {
 	sender := NewBrevoSender("test-api-key", "noreply@example.com", "TestApp")
 	sender.SetBaseURL(server.URL)
 
-	err := sender.SendVerificationEmail(context.Background(), "user@example.com", "Test User", "dummy-verification-token")
+	err := sender.SendVerificationEmail(context.Background(), "user@example.com", "Test User", "123456")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -39,6 +39,9 @@ func TestBrevoSender_Success(t *testing.T) {
 	}
 	if receivedPayload.Sender.Email != "noreply@example.com" {
 		t.Errorf("expected sender noreply@example.com, got %s", receivedPayload.Sender.Email)
+	}
+	if receivedPayload.Subject != "Your WAAP Verification OTP: 123456" {
+		t.Errorf("expected subject 'Your WAAP Verification OTP: 123456', got %s", receivedPayload.Subject)
 	}
 }
 

@@ -58,9 +58,16 @@ type RegisterInput struct {
 	PhoneNumber *string `json:"phone_number,omitempty"`
 }
 
-// VerifyEmailInput models the email verification request payload.
+// RegisterResponse models the response payload returned after successful registration.
+type RegisterResponse struct {
+	Message string       `json:"message"`
+	User    UserResponse `json:"user"`
+}
+
+// VerifyEmailInput models the email verification request payload requiring both email and otp.
 type VerifyEmailInput struct {
-	Token string `json:"token" binding:"required"`
+	Email string `json:"email" binding:"required"`
+	OTP   string `json:"otp" binding:"required"`
 }
 
 // VerifyEmailResponse models the response when an email is successfully verified.

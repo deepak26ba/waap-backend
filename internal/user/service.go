@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -31,7 +32,8 @@ const (
 
 	DefaultAccessTTL            = 15 * time.Minute
 	DefaultRefreshTTL           = 7 * 24 * time.Hour
-	DefaultVerificationTokenTTL = 5 * time.Minute
+	DefaultVerificationOTPTTL   = 5 * time.Minute
+	DefaultVerificationTokenTTL = DefaultVerificationOTPTTL
 )
 
 // Precomputed dummy bcrypt hash (cost 12) for constant-time password comparisons
@@ -40,11 +42,11 @@ const dummyBcryptHash = "$2a$12$e8Yk2uKzLqO2Vl5h4v1lQO8sC6P0f9F2a6D1H4J7K9L2M5N7
 
 // Service defines the business logic contract for authentication and user management.
 type Service interface {
-	Register(ctx context.Context, in RegisterInput) (*UserResponse, error)
+	Register(ctx context.Context, in RegisterInput) (*RegisterResponse, error)
 	Login(ctx context.Context, in LoginInput) (*LoginResponse, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*TokenPair, error)
 	GetProfile(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
-	VerifyEmail(ctx context.Context, token string) error
+	VerifyEmail(ctx context.Context, email, otp string) error
 	ResendVerificationEmail(ctx context.Context, email string) error
 }
 
@@ -100,7 +102,7 @@ func NewService(
 
 // Register handles validation, Bcrypt password hashing (cost 12), database insertion,
 // in-memory verification token storage, and dispatching verification email via Brevo.
-func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse, error) {
+func (s *service) Register(ctx context.Context, in RegisterInput) (*RegisterResponse, error) {
 	// 1. Sanitize and validate inputs
 	rawEmail := strings.TrimSpace(in.Email)
 	if rawEmail == "" {
@@ -170,17 +172,17 @@ func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse
 		return nil, response.NewInternalError(errors.New("failed to register user"))
 	}
 
-	// 5. Generate secure verification token and store in memory (deleted automatically after expired)
-	rawToken, tokenHash, err := generateVerificationToken()
+	// 5. Generate secure 6-digit numeric OTP and store in memory (deleted automatically after expired)
+	rawOTP, otpHash, err := generateOTP()
 	if err != nil {
-		s.log.Error("failed to generate email verification token", zap.Error(err), zap.String("user_id", u.ID.String()))
+		s.log.Error("failed to generate email verification otp", zap.Error(err), zap.String("user_id", u.ID.String()))
 	} else {
-		// Store in memory with expiration TTL
-		s.tokenStore.Store(tokenHash, u.ID, s.verificationTokenTTL)
+		// Store in memory with 5-minute expiration TTL
+		s.tokenStore.Store(otpHash, u.ID, s.verificationTokenTTL)
 
 		// 6. Deliver verification email via Brevo
-		// Sensitive token is passed to email transport, NEVER logged in application logs
-		if err := s.mailer.SendVerificationEmail(ctx, u.Email, u.FullName, rawToken); err != nil {
+		// Sensitive OTP is passed to email transport, NEVER logged in application logs
+		if err := s.mailer.SendVerificationEmail(ctx, u.Email, u.FullName, rawOTP); err != nil {
 			s.log.Error("failed to dispatch verification email", zap.Error(err), zap.String("user_id", u.ID.String()))
 		}
 	}
@@ -191,14 +193,17 @@ func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse
 		resPhone = &p
 	}
 
-	return &UserResponse{
-		ID:            u.ID,
-		Email:         u.Email,
-		FullName:      u.FullName,
-		Role:          u.Role,
-		PhoneNumber:   resPhone,
-		EmailVerified: u.EmailVerified,
-		CreatedAt:     u.CreatedAt.Time,
+	return &RegisterResponse{
+		Message: "Registration successful. Please enter the OTP sent to your email to activate your account.",
+		User: UserResponse{
+			ID:            u.ID,
+			Email:         u.Email,
+			FullName:      u.FullName,
+			Role:          u.Role,
+			PhoneNumber:   resPhone,
+			EmailVerified: u.EmailVerified,
+			CreatedAt:     u.CreatedAt.Time,
+		},
 	}, nil
 }
 
@@ -290,39 +295,71 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 	return GenerateTokenPair(u.ID, u.Email, u.Role, s.jwtSecret, s.accessTTL, s.refreshTTL)
 }
 
-// VerifyEmail validates the submitted verification token from memory and marks user email as verified.
-func (s *service) VerifyEmail(ctx context.Context, rawToken string) error {
-	rawToken = strings.TrimSpace(rawToken)
-	if rawToken == "" {
-		return response.NewBadRequestError("INVALID_TOKEN", "verification token is required")
+// VerifyEmail validates the submitted verification OTP and ensures it matches the provided email address.
+func (s *service) VerifyEmail(ctx context.Context, rawEmail, rawOTP string) error {
+	rawEmail = strings.TrimSpace(rawEmail)
+	if rawEmail == "" {
+		return response.NewValidationError("validation failed", []response.FieldError{
+			{Field: "email", Message: "email is required"},
+		})
+	}
+	rawOTP = strings.TrimSpace(rawOTP)
+	if rawOTP == "" {
+		return response.NewValidationError("validation failed", []response.FieldError{
+			{Field: "otp", Message: "verification otp is required"},
+		})
 	}
 
-	tokenHash := hashVerificationToken(rawToken)
+	parsedAddr, err := mail.ParseAddress(rawEmail)
+	if err != nil || parsedAddr.Address != rawEmail {
+		return response.NewValidationError("validation failed", []response.FieldError{
+			{Field: "email", Message: "invalid email format"},
+		})
+	}
+	emailAddr := strings.ToLower(parsedAddr.Address)
 
-	userID, err := s.tokenStore.ValidateAndConsume(tokenHash)
+	otpHash := hashOTP(rawOTP)
+
+	otpUserID, err := s.tokenStore.ValidateAndConsume(otpHash)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrTokenNotFound):
-			return response.NewBadRequestError("INVALID_TOKEN", "invalid verification token")
-		case errors.Is(err, ErrTokenExpired):
-			return response.NewBadRequestError("TOKEN_EXPIRED", "verification token has expired")
-		case errors.Is(err, ErrTokenAlreadyUsed):
-			return response.NewBadRequestError("TOKEN_ALREADY_USED", "verification token has already been used")
+		case errors.Is(err, ErrTokenNotFound), errors.Is(err, ErrOTPNotFound):
+			return response.NewBadRequestError("INVALID_OTP", "invalid or expired verification otp")
+		case errors.Is(err, ErrTokenExpired), errors.Is(err, ErrOTPExpired):
+			return response.NewBadRequestError("OTP_EXPIRED", "verification otp has expired")
+		case errors.Is(err, ErrTokenAlreadyUsed), errors.Is(err, ErrOTPAlreadyUsed):
+			return response.NewBadRequestError("OTP_ALREADY_USED", "verification otp has already been used")
 		default:
-			return response.NewBadRequestError("INVALID_TOKEN", "invalid verification token")
+			return response.NewBadRequestError("INVALID_OTP", "invalid verification otp")
 		}
 	}
 
-	if _, err := s.repo.MarkUserEmailVerified(ctx, userID); err != nil {
-		s.log.Error("failed to mark email as verified", zap.Error(err), zap.String("user_id", userID.String()))
+	// Verify that the OTP corresponds to the submitted email
+	u, err := s.repo.GetByID(ctx, otpUserID)
+	if err != nil {
+		s.log.Error("failed to find user by otp user_id", zap.Error(err), zap.String("user_id", otpUserID.String()))
+		return response.NewBadRequestError("INVALID_OTP", "invalid verification otp")
+	}
+
+	if strings.ToLower(u.Email) != emailAddr {
+		s.log.Warn("verification otp email mismatch",
+			zap.String("otp_user_id", otpUserID.String()),
+			zap.String("otp_email", u.Email),
+			zap.String("provided_email", emailAddr),
+		)
+		return response.NewBadRequestError("INVALID_OTP", "verification otp does not match the provided email address")
+	}
+
+	if _, err := s.repo.MarkUserEmailVerified(ctx, u.ID); err != nil {
+		s.log.Error("failed to mark email as verified", zap.Error(err), zap.String("user_id", u.ID.String()))
 		return response.NewInternalError(errors.New("failed to verify email"))
 	}
 
-	s.log.Info("email verified successfully", zap.String("user_id", userID.String()))
+	s.log.Info("email verified successfully", zap.String("user_id", u.ID.String()))
 	return nil
 }
 
-// ResendVerificationEmail sends a fresh verification token to an unverified user's email.
+// ResendVerificationEmail sends a fresh 6-digit verification OTP to an unverified user's email.
 func (s *service) ResendVerificationEmail(ctx context.Context, rawEmail string) error {
 	rawEmail = strings.TrimSpace(rawEmail)
 	if rawEmail == "" {
@@ -353,19 +390,19 @@ func (s *service) ResendVerificationEmail(ctx context.Context, rawEmail string) 
 		return response.NewBadRequestError("EMAIL_ALREADY_VERIFIED", "this email address is already verified")
 	}
 
-	// Invalidate any older pending tokens for this user
+	// Invalidate any older pending OTPs for this user
 	s.tokenStore.DeleteByUserID(u.ID)
 
-	// Generate fresh token
-	rawToken, tokenHash, err := generateVerificationToken()
+	// Generate fresh random 6-digit numeric OTP
+	rawOTP, otpHash, err := generateOTP()
 	if err != nil {
-		s.log.Error("failed to generate email verification token", zap.Error(err), zap.String("user_id", u.ID.String()))
-		return response.NewInternalError(errors.New("failed to generate verification token"))
+		s.log.Error("failed to generate email verification otp", zap.Error(err), zap.String("user_id", u.ID.String()))
+		return response.NewInternalError(errors.New("failed to generate verification otp"))
 	}
 
-	s.tokenStore.Store(tokenHash, u.ID, s.verificationTokenTTL)
+	s.tokenStore.Store(otpHash, u.ID, s.verificationTokenTTL)
 
-	if err := s.mailer.SendVerificationEmail(ctx, u.Email, u.FullName, rawToken); err != nil {
+	if err := s.mailer.SendVerificationEmail(ctx, u.Email, u.FullName, rawOTP); err != nil {
 		s.log.Error("failed to dispatch verification email", zap.Error(err), zap.String("user_id", u.ID.String()))
 	}
 
@@ -373,18 +410,20 @@ func (s *service) ResendVerificationEmail(ctx context.Context, rawEmail string) 
 	return nil
 }
 
-func generateVerificationToken() (string, string, error) {
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", "", fmt.Errorf("failed to generate random token: %w", err)
+// generateOTP produces a cryptographically secure, uniformly distributed 6-digit numeric OTP.
+func generateOTP() (string, string, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(900000))
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate random otp: %w", err)
 	}
-	rawToken := hex.EncodeToString(bytes)
-	tokenHash := hashVerificationToken(rawToken)
-	return rawToken, tokenHash, nil
+	rawOTP := fmt.Sprintf("%06d", 100000+n.Int64())
+	otpHash := hashOTP(rawOTP)
+	return rawOTP, otpHash, nil
 }
 
-func hashVerificationToken(rawToken string) string {
-	h := sha256.Sum256([]byte(rawToken))
+// hashOTP returns the hex-encoded SHA-256 digest of an OTP string.
+func hashOTP(rawOTP string) string {
+	h := sha256.Sum256([]byte(rawOTP))
 	return hex.EncodeToString(h[:])
 }
 

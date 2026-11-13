@@ -9,40 +9,51 @@ import (
 )
 
 var (
-	ErrTokenNotFound    = errors.New("token not found")
-	ErrTokenExpired     = errors.New("token expired")
-	ErrTokenAlreadyUsed = errors.New("token already used")
+	ErrOTPNotFound    = errors.New("otp not found")
+	ErrOTPExpired     = errors.New("otp expired")
+	ErrOTPAlreadyUsed = errors.New("otp already used")
+
+	// Backwards-compatibility aliases
+	ErrTokenNotFound    = ErrOTPNotFound
+	ErrTokenExpired     = ErrOTPExpired
+	ErrTokenAlreadyUsed = ErrOTPAlreadyUsed
 )
 
-type tokenItem struct {
+type otpItem struct {
 	userID    uuid.UUID
 	expiresAt time.Time
 	used      bool
 }
 
-// TokenStore defines the contract for storing and validating verification tokens in memory.
-type TokenStore interface {
-	Store(tokenHash string, userID uuid.UUID, ttl time.Duration)
-	ValidateAndConsume(tokenHash string) (uuid.UUID, error)
-	Delete(tokenHash string)
+// OTPStore defines the contract for storing and validating verification OTPs in memory.
+type OTPStore interface {
+	Store(otpHash string, userID uuid.UUID, ttl time.Duration)
+	ValidateAndConsume(otpHash string) (uuid.UUID, error)
+	Delete(otpHash string)
 	DeleteByUserID(userID uuid.UUID)
 	Close()
 }
 
-// MemoryTokenStore is a thread-safe in-memory store for verification tokens that deletes expired entries.
-type MemoryTokenStore struct {
+// TokenStore is an alias for OTPStore.
+type TokenStore = OTPStore
+
+// MemoryOTPStore is a thread-safe in-memory store for verification OTPs that deletes expired entries.
+type MemoryOTPStore struct {
 	mu     sync.RWMutex
-	tokens map[string]tokenItem
+	otps   map[string]otpItem
 	stopCh chan struct{}
 }
 
-// NewMemoryTokenStore constructs a MemoryTokenStore and starts background expiration cleanup.
-func NewMemoryTokenStore(cleanupInterval time.Duration) *MemoryTokenStore {
+// MemoryTokenStore is an alias for MemoryOTPStore.
+type MemoryTokenStore = MemoryOTPStore
+
+// NewMemoryOTPStore constructs a MemoryOTPStore and starts background expiration cleanup.
+func NewMemoryOTPStore(cleanupInterval time.Duration) *MemoryOTPStore {
 	if cleanupInterval <= 0 {
 		cleanupInterval = 1 * time.Minute
 	}
-	s := &MemoryTokenStore{
-		tokens: make(map[string]tokenItem),
+	s := &MemoryOTPStore{
+		otps:   make(map[string]otpItem),
 		stopCh: make(chan struct{}),
 	}
 
@@ -62,75 +73,80 @@ func NewMemoryTokenStore(cleanupInterval time.Duration) *MemoryTokenStore {
 	return s
 }
 
-// Store records a token hash, associating it with the user ID and expiration duration.
-func (s *MemoryTokenStore) Store(tokenHash string, userID uuid.UUID, ttl time.Duration) {
+// NewMemoryTokenStore is an alias for NewMemoryOTPStore.
+func NewMemoryTokenStore(cleanupInterval time.Duration) *MemoryOTPStore {
+	return NewMemoryOTPStore(cleanupInterval)
+}
+
+// Store records an OTP hash, associating it with the user ID and expiration duration.
+func (s *MemoryOTPStore) Store(otpHash string, userID uuid.UUID, ttl time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tokens[tokenHash] = tokenItem{
+	s.otps[otpHash] = otpItem{
 		userID:    userID,
 		expiresAt: time.Now().Add(ttl),
 		used:      false,
 	}
 }
 
-// ValidateAndConsume validates the token, marks it consumed to prevent reuse, and purges if expired.
-func (s *MemoryTokenStore) ValidateAndConsume(tokenHash string) (uuid.UUID, error) {
+// ValidateAndConsume validates the OTP, marks it consumed to prevent reuse, and purges if expired.
+func (s *MemoryOTPStore) ValidateAndConsume(otpHash string) (uuid.UUID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	item, exists := s.tokens[tokenHash]
+	item, exists := s.otps[otpHash]
 	if !exists {
-		return uuid.Nil, ErrTokenNotFound
+		return uuid.Nil, ErrOTPNotFound
 	}
 
 	if item.used {
-		return uuid.Nil, ErrTokenAlreadyUsed
+		return uuid.Nil, ErrOTPAlreadyUsed
 	}
 
 	if time.Now().After(item.expiresAt) {
-		delete(s.tokens, tokenHash)
-		return uuid.Nil, ErrTokenExpired
+		delete(s.otps, otpHash)
+		return uuid.Nil, ErrOTPExpired
 	}
 
 	// Mark as consumed to enforce single-use
 	item.used = true
-	s.tokens[tokenHash] = item
+	s.otps[otpHash] = item
 
 	return item.userID, nil
 }
 
-// Delete removes a token from memory immediately.
-func (s *MemoryTokenStore) Delete(tokenHash string) {
+// Delete removes an OTP from memory immediately.
+func (s *MemoryOTPStore) Delete(otpHash string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.tokens, tokenHash)
+	delete(s.otps, otpHash)
 }
 
-// DeleteByUserID purges all tokens associated with a given user ID.
-func (s *MemoryTokenStore) DeleteByUserID(userID uuid.UUID) {
+// DeleteByUserID purges all OTPs associated with a given user ID.
+func (s *MemoryOTPStore) DeleteByUserID(userID uuid.UUID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for k, v := range s.tokens {
+	for k, v := range s.otps {
 		if v.userID == userID {
-			delete(s.tokens, k)
+			delete(s.otps, k)
 		}
 	}
 }
 
-// cleanupExpired removes all tokens whose expiration timestamp has passed.
-func (s *MemoryTokenStore) cleanupExpired() {
+// cleanupExpired removes all OTPs whose expiration timestamp has passed.
+func (s *MemoryOTPStore) cleanupExpired() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
-	for k, v := range s.tokens {
+	for k, v := range s.otps {
 		if now.After(v.expiresAt) {
-			delete(s.tokens, k)
+			delete(s.otps, k)
 		}
 	}
 }
 
 // Close stops the periodic cleanup goroutine.
-func (s *MemoryTokenStore) Close() {
+func (s *MemoryOTPStore) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	select {
