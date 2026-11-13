@@ -66,3 +66,4 @@ func TestLoadConfig_JWTSecretValidation(t *testing.T) {
 		}
 	})
 }
+
