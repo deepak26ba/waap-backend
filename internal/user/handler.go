@@ -2,6 +2,7 @@ package user
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 
 	"waap-backend/pkg/response"
@@ -21,11 +22,21 @@ func NewHandler(service Service, log *zap.Logger) *Handler {
 	}
 }
 
-// RegisterRoutes registers auth endpoints on the provided router group.
+// RegisterRoutes registers public auth endpoints on the provided router group.
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+	h.RegisterAuthRoutes(rg)
+}
+
+// RegisterAuthRoutes registers public authentication endpoints on the provided router group.
+func (h *Handler) RegisterAuthRoutes(rg *gin.RouterGroup) {
 	rg.POST("/register", h.Register)
 	rg.POST("/login", h.Login)
 	rg.POST("/refresh", h.Refresh)
+}
+
+// RegisterProfileRoutes registers authenticated profile endpoints on the provided router group.
+func (h *Handler) RegisterProfileRoutes(rg *gin.RouterGroup) {
+	rg.GET("/me", h.GetProfile)
 }
 
 // Register godoc
@@ -105,4 +116,34 @@ func (h *Handler) Refresh(c *gin.Context) {
 	}
 
 	response.OK(c, tokens)
+}
+
+// GetProfile godoc
+// @Summary Get current user profile
+// @Tags Users
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} response.Envelope{data=UserResponse}
+// @Failure 401 {object} response.Envelope{error=response.APIError}
+// @Failure 404 {object} response.Envelope{error=response.APIError}
+// @Router /api/v1/users/me [get]
+func (h *Handler) GetProfile(c *gin.Context) {
+	val, exists := c.Get(ContextUserID)
+	if !exists {
+		response.Unauthorized(c, response.ErrCodeUnauthorized, "unauthenticated user context")
+		return
+	}
+	userID, ok := val.(uuid.UUID)
+	if !ok {
+		response.Unauthorized(c, response.ErrCodeUnauthorized, "invalid user context")
+		return
+	}
+
+	res, err := h.service.GetProfile(c.Request.Context(), userID)
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.OK(c, res)
 }

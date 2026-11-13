@@ -19,6 +19,7 @@ type mockAuthService struct {
 	registerFunc     func(ctx context.Context, in RegisterInput) (*UserResponse, error)
 	loginFunc        func(ctx context.Context, in LoginInput) (*LoginResponse, error)
 	refreshTokenFunc func(ctx context.Context, refreshToken string) (*TokenPair, error)
+	getProfileFunc   func(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
 }
 
 func (m *mockAuthService) Register(ctx context.Context, in RegisterInput) (*UserResponse, error) {
@@ -38,6 +39,13 @@ func (m *mockAuthService) Login(ctx context.Context, in LoginInput) (*LoginRespo
 func (m *mockAuthService) RefreshToken(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	if m.refreshTokenFunc != nil {
 		return m.refreshTokenFunc(ctx, refreshToken)
+	}
+	return nil, nil
+}
+
+func (m *mockAuthService) GetProfile(ctx context.Context, userID uuid.UUID) (*UserResponse, error) {
+	if m.getProfileFunc != nil {
+		return m.getProfileFunc(ctx, userID)
 	}
 	return nil, nil
 }
@@ -220,6 +228,50 @@ func TestAuthHandler_Refresh(t *testing.T) {
 
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected 400 Bad Request, got %d", w.Code)
+		}
+	})
+}
+
+func TestAuthHandler_GetProfile(t *testing.T) {
+	testUserID := uuid.Must(uuid.NewV4())
+
+	t.Run("Authenticated user receives profile", func(t *testing.T) {
+		svc := &mockAuthService{
+			getProfileFunc: func(ctx context.Context, userID uuid.UUID) (*UserResponse, error) {
+				return &UserResponse{
+					ID:       userID,
+					Email:    "profile@example.com",
+					FullName: "Profile User",
+				}, nil
+			},
+		}
+		h := NewHandler(svc, nil)
+		r := gin.New()
+		r.GET("/me", func(c *gin.Context) {
+			c.Set(ContextUserID, testUserID)
+			h.GetProfile(c)
+		})
+
+		req, _ := http.NewRequest(http.MethodGet, "/me", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", w.Code)
+		}
+	})
+
+	t.Run("Missing context user_id returns 401", func(t *testing.T) {
+		h := NewHandler(&mockAuthService{}, nil)
+		r := gin.New()
+		r.GET("/me", h.GetProfile)
+
+		req, _ := http.NewRequest(http.MethodGet, "/me", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 Unauthorized, got %d", w.Code)
 		}
 	})
 }

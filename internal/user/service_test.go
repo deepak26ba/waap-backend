@@ -484,3 +484,39 @@ func TestValidateExpiredToken(t *testing.T) {
 		t.Errorf("expected error when validating expired token")
 	}
 }
+
+func TestService_GetProfile(t *testing.T) {
+	repo := newMockUserRepository()
+	svc := NewService(repo, "secret", 15*time.Minute, 24*time.Hour)
+	ctx := context.Background()
+
+	phone := "1234567890"
+	created, err := repo.Create(ctx, db.CreateUserParams{
+		Email:        "profile@example.com",
+		PasswordHash: "hashed",
+		FullName:     "Profile User",
+		Role:         "customer",
+		PhoneNumber:  pgtype.Text{String: phone, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	t.Run("Existing user returns profile", func(t *testing.T) {
+		res, err := svc.GetProfile(ctx, created.ID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.ID != created.ID || res.Email != "profile@example.com" || *res.PhoneNumber != phone {
+			t.Errorf("profile fields mismatch: %+v", res)
+		}
+	})
+
+	t.Run("Non-existent user returns 404", func(t *testing.T) {
+		randomID := uuid.Must(uuid.NewV4())
+		_, err := svc.GetProfile(ctx, randomID)
+		if err == nil {
+			t.Fatalf("expected error for non-existent user")
+		}
+	})
+}
