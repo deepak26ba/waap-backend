@@ -1,4 +1,4 @@
-package auth
+package service
 
 import (
 	"context"
@@ -10,26 +10,27 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"waap-backend/internal/model"
+	"waap-backend/internal/repository"
 	"waap-backend/pkg/db"
 	"waap-backend/pkg/response"
 )
 
-type mockQuerier struct {
-	db.Querier
+type mockUserRepository struct {
 	usersByEmail map[string]db.User
 	usersByID    map[int64]db.User
 	nextID       int64
 }
 
-func newMockQuerier() *mockQuerier {
-	return &mockQuerier{
+func newMockUserRepository() *mockUserRepository {
+	return &mockUserRepository{
 		usersByEmail: make(map[string]db.User),
 		usersByID:    make(map[int64]db.User),
 		nextID:       1,
 	}
 }
 
-func (m *mockQuerier) CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
+func (m *mockUserRepository) Create(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 	if _, exists := m.usersByEmail[arg.Email]; exists {
 		return db.User{}, errors.New("duplicate key value violates unique constraint \"users_email_key\"")
 	}
@@ -51,7 +52,7 @@ func (m *mockQuerier) CreateUser(ctx context.Context, arg db.CreateUserParams) (
 	return u, nil
 }
 
-func (m *mockQuerier) GetUserByEmail(ctx context.Context, email string) (db.User, error) {
+func (m *mockUserRepository) GetByEmail(ctx context.Context, email string) (db.User, error) {
 	u, exists := m.usersByEmail[email]
 	if !exists {
 		return db.User{}, pgx.ErrNoRows
@@ -59,7 +60,7 @@ func (m *mockQuerier) GetUserByEmail(ctx context.Context, email string) (db.User
 	return u, nil
 }
 
-func (m *mockQuerier) GetUserByID(ctx context.Context, id int64) (db.User, error) {
+func (m *mockUserRepository) GetByID(ctx context.Context, id int64) (db.User, error) {
 	u, exists := m.usersByID[id]
 	if !exists {
 		return db.User{}, pgx.ErrNoRows
@@ -67,15 +68,33 @@ func (m *mockQuerier) GetUserByID(ctx context.Context, id int64) (db.User, error
 	return u, nil
 }
 
+func (m *mockUserRepository) Update(ctx context.Context, arg db.UpdateUserParams) (db.User, error) {
+	u, exists := m.usersByID[arg.ID]
+	if !exists {
+		return db.User{}, pgx.ErrNoRows
+	}
+	if arg.FullName != "" {
+		u.FullName = arg.FullName
+	}
+	if arg.PhoneNumber.Valid {
+		u.PhoneNumber = arg.PhoneNumber
+	}
+	m.usersByID[u.ID] = u
+	m.usersByEmail[u.Email] = u
+	return u, nil
+}
+
+var _ repository.UserRepository = (*mockUserRepository)(nil)
+
 func TestAuthService_Register(t *testing.T) {
 	ctx := context.Background()
 	secret := "test-secret"
-	mock := newMockQuerier()
-	svc := NewService(mock, secret, 15*time.Minute, 7*24*time.Hour)
+	mock := newMockUserRepository()
+	svc := NewAuthService(mock, secret, 15*time.Minute, 7*24*time.Hour)
 
 	t.Run("Successful Registration", func(t *testing.T) {
 		phone := "+1234567890"
-		in := RegisterInput{
+		in := model.RegisterInput{
 			Email:       "test@example.com",
 			Password:    "password123",
 			FullName:    "John Doe",
@@ -108,7 +127,7 @@ func TestAuthService_Register(t *testing.T) {
 	})
 
 	t.Run("Duplicate Email Rejection (409 Conflict)", func(t *testing.T) {
-		in := RegisterInput{
+		in := model.RegisterInput{
 			Email:    "test@example.com", // already registered above
 			Password: "newpassword123",
 			FullName: "Jane Doe",
@@ -133,7 +152,7 @@ func TestAuthService_Register(t *testing.T) {
 	})
 
 	t.Run("Short Password Validation (< 8 chars)", func(t *testing.T) {
-		in := RegisterInput{
+		in := model.RegisterInput{
 			Email:    "short@example.com",
 			Password: "short",
 			FullName: "Short Pass",
@@ -151,7 +170,7 @@ func TestAuthService_Register(t *testing.T) {
 	})
 
 	t.Run("Long Password Validation (> 72 bytes)", func(t *testing.T) {
-		in := RegisterInput{
+		in := model.RegisterInput{
 			Email:    "longpass@example.com",
 			Password: strings.Repeat("A", 73),
 			FullName: "Long Pass",
@@ -169,7 +188,7 @@ func TestAuthService_Register(t *testing.T) {
 	})
 
 	t.Run("Display Name In Email Format Rejected", func(t *testing.T) {
-		in := RegisterInput{
+		in := model.RegisterInput{
 			Email:    "John Doe <john@example.com>",
 			Password: "validpassword123",
 			FullName: "John Doe",
@@ -187,7 +206,7 @@ func TestAuthService_Register(t *testing.T) {
 	})
 
 	t.Run("Invalid Email Format", func(t *testing.T) {
-		in := RegisterInput{
+		in := model.RegisterInput{
 			Email:    "invalid-email-address",
 			Password: "validpassword123",
 			FullName: "Bad Email",
@@ -208,11 +227,11 @@ func TestAuthService_Register(t *testing.T) {
 func TestAuthService_Login(t *testing.T) {
 	ctx := context.Background()
 	secret := "test-secret"
-	mock := newMockQuerier()
-	svc := NewService(mock, secret, 15*time.Minute, 7*24*time.Hour)
+	mock := newMockUserRepository()
+	svc := NewAuthService(mock, secret, 15*time.Minute, 7*24*time.Hour)
 
 	// Pre-register user
-	regIn := RegisterInput{
+	regIn := model.RegisterInput{
 		Email:    "customer@example.com",
 		Password: "SecurePassword123!",
 		FullName: "Alice Customer",
@@ -223,7 +242,7 @@ func TestAuthService_Login(t *testing.T) {
 	}
 
 	t.Run("Valid Login Credentials", func(t *testing.T) {
-		in := LoginInput{
+		in := model.LoginInput{
 			Email:    "customer@example.com",
 			Password: "SecurePassword123!",
 		}
@@ -254,7 +273,7 @@ func TestAuthService_Login(t *testing.T) {
 	})
 
 	t.Run("Invalid Password Returns 401", func(t *testing.T) {
-		in := LoginInput{
+		in := model.LoginInput{
 			Email:    "customer@example.com",
 			Password: "WrongPassword!",
 		}
@@ -271,7 +290,7 @@ func TestAuthService_Login(t *testing.T) {
 	})
 
 	t.Run("Non-Existent Email Returns 401", func(t *testing.T) {
-		in := LoginInput{
+		in := model.LoginInput{
 			Email:    "nonexistent@example.com",
 			Password: "AnyPassword123!",
 		}
@@ -293,7 +312,7 @@ func TestAuthService_Login(t *testing.T) {
 		u.IsActive = false
 		mock.usersByEmail["customer@example.com"] = u
 
-		in := LoginInput{
+		in := model.LoginInput{
 			Email:    "customer@example.com",
 			Password: "WrongPassword123!",
 		}
@@ -314,7 +333,7 @@ func TestAuthService_Login(t *testing.T) {
 		u.IsActive = false
 		mock.usersByEmail["customer@example.com"] = u
 
-		in := LoginInput{
+		in := model.LoginInput{
 			Email:    "customer@example.com",
 			Password: "SecurePassword123!",
 		}
@@ -334,10 +353,10 @@ func TestAuthService_Login(t *testing.T) {
 func TestAuthService_RefreshToken(t *testing.T) {
 	ctx := context.Background()
 	secret := "test-secret"
-	mock := newMockQuerier()
-	svc := NewService(mock, secret, 15*time.Minute, 7*24*time.Hour)
+	mock := newMockUserRepository()
+	svc := NewAuthService(mock, secret, 15*time.Minute, 7*24*time.Hour)
 
-	_, err := svc.Register(ctx, RegisterInput{
+	_, err := svc.Register(ctx, model.RegisterInput{
 		Email:    "refresh@example.com",
 		Password: "Password123!",
 		FullName: "Refresh User",
@@ -346,7 +365,7 @@ func TestAuthService_RefreshToken(t *testing.T) {
 		t.Fatalf("failed to register: %v", err)
 	}
 
-	loginRes, err := svc.Login(ctx, LoginInput{
+	loginRes, err := svc.Login(ctx, model.LoginInput{
 		Email:    "refresh@example.com",
 		Password: "Password123!",
 	})

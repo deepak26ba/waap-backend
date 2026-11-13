@@ -9,8 +9,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"waap-backend/internal/config"
 	"waap-backend/internal/server"
+	"waap-backend/pkg/config"
 	"waap-backend/pkg/db"
 	"waap-backend/pkg/logger"
 )

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"waap-backend/internal/config"
+	"waap-backend/pkg/config"
 )
 
 func TestAutoMigrate_LiveDB(t *testing.T) {

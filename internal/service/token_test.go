@@ -1,8 +1,10 @@
-package auth
+package service
 
 import (
 	"testing"
 	"time"
+
+	"waap-backend/internal/model"
 )
 
 func TestPasswordHashingAndVerification(t *testing.T) {
@@ -63,8 +65,8 @@ func TestGenerateAndValidateToken(t *testing.T) {
 	if claims.Role != role {
 		t.Errorf("expected role %s, got %s", role, claims.Role)
 	}
-	if claims.TokenType != TokenTypeAccess {
-		t.Errorf("expected token_type %s, got %s", TokenTypeAccess, claims.TokenType)
+	if claims.TokenType != model.TokenTypeAccess {
+		t.Errorf("expected token_type %s, got %s", model.TokenTypeAccess, claims.TokenType)
 	}
 
 	// Validate Refresh Token
@@ -72,8 +74,8 @@ func TestGenerateAndValidateToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to validate refresh token: %v", err)
 	}
-	if refreshClaims.TokenType != TokenTypeRefresh {
-		t.Errorf("expected token_type %s, got %s", TokenTypeRefresh, refreshClaims.TokenType)
+	if refreshClaims.TokenType != model.TokenTypeRefresh {
+		t.Errorf("expected token_type %s, got %s", model.TokenTypeRefresh, refreshClaims.TokenType)
 	}
 
 	// Validate with wrong secret fails
@@ -91,7 +93,7 @@ func TestGenerateAndValidateToken(t *testing.T) {
 
 func TestValidateExpiredToken(t *testing.T) {
 	secret := "secret-key"
-	// 1 millisecond expiration
+	// Expired token
 	tokens, err := GenerateTokenPair(1, "test@test.com", "customer", secret, -1*time.Minute, -1*time.Minute)
 	if err != nil {
 		t.Fatalf("failed to generate token pair: %v", err)
@@ -99,6 +101,6 @@ func TestValidateExpiredToken(t *testing.T) {
 
 	_, err = ValidateToken(tokens.AccessToken, secret)
 	if err == nil {
-		t.Errorf("expected error for expired token, got nil")
+		t.Errorf("expected error when validating expired token")
 	}
 }

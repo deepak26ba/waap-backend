@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"waap-backend/internal/config"
+	"waap-backend/pkg/config"
 )
 
 // NewPool initializes and validates a PostgreSQL connection pool using pgxpool.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"waap-backend/internal/config"
+	"waap-backend/pkg/config"
 )
 
 func TestPoolAndQueries_HealthCheck(t *testing.T) {
