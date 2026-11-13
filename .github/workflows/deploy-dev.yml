@@ -42,15 +42,14 @@ jobs:
         env:
           DEV_HOOK: ${{ secrets.RENDER_DEV_DEPLOY_HOOK }}
           STAGING_HOOK: ${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}
-          DEFAULT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
           API_KEY: ${{ secrets.RENDER_API_KEY }}
-          SERVICE_ID: ${{ secrets.RENDER_DEV_SERVICE_ID || secrets.RENDER_SERVICE_ID }}
+          SERVICE_ID: ${{ secrets.RENDER_DEV_SERVICE_ID || secrets.RENDER_STAGING_SERVICE_ID }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
           echo "=== Initiating Render Deployment for branch 'dev' (commit: $COMMIT_SHA) ==="
 
           # 1. Check Deploy Hook URL (Recommended)
-          HOOK_URL="${DEV_HOOK:-${STAGING_HOOK:-$DEFAULT_HOOK}}"
+          HOOK_URL="${DEV_HOOK:-$STAGING_HOOK}"
 
           if [ -n "$HOOK_URL" ]; then
             DEPLOY_URL="$HOOK_URL"
@@ -78,12 +77,12 @@ jobs:
 
           # 2. Check Render REST API
           if [ -n "$API_KEY" ] && [ -n "$SERVICE_ID" ]; then
-            echo "Triggering deployment via Render REST API for service: $SERVICE_ID..."
+            echo "Triggering deployment via Render REST API for service: $SERVICE_ID (commit: $COMMIT_SHA)..."
             HTTP_RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
               -X POST "https://api.render.com/v1/services/${SERVICE_ID}/deploys" \
               -H "Authorization: Bearer ${API_KEY}" \
               -H "Content-Type: application/json" \
-              -d '{"clearCache": "do_not_clear"}')
+              -d "{\"clearCache\": \"do_not_clear\", \"commitId\": \"${COMMIT_SHA}\"}")
 
             HTTP_STATUS=$(echo "$HTTP_RESPONSE" | grep "HTTP_STATUS:" | cut -d: -f2)
             BODY=$(echo "$HTTP_RESPONSE" | sed '/HTTP_STATUS:/d')
@@ -104,11 +103,11 @@ jobs:
           echo ""
           echo "To enable auto-deploy, configure one of the following in Repository Settings -> Secrets and variables -> Actions:"
           echo "Option A (Deploy Hook - Recommended):"
-          echo "  - Secret Name: RENDER_DEV_DEPLOY_HOOK (or RENDER_STAGING_DEPLOY_HOOK / RENDER_DEPLOY_HOOK)"
+          echo "  - Secret Name: RENDER_DEV_DEPLOY_HOOK (or RENDER_STAGING_DEPLOY_HOOK)"
           echo "  - Value: Deploy Hook URL copied from Render Dashboard -> Your Web Service -> Settings -> Deploy Hook."
           echo ""
           echo "Option B (Render REST API):"
           echo "  - Secret Name: RENDER_API_KEY (from Render Account Settings -> API Keys)"
-          echo "  - Secret Name: RENDER_DEV_SERVICE_ID (from your Web Service URL, format: srv-xxxxxxxxxxxxxxxxxxxx)"
+          echo "  - Secret Name: RENDER_DEV_SERVICE_ID (or RENDER_STAGING_SERVICE_ID, format: srv-xxxxxxxxxxxxxxxxxxxx)"
           exit 1
 
