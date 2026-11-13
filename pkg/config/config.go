@@ -31,6 +31,7 @@ type Config struct {
 
 	// Auth
 	JWTSecret            string
+	VerificationOTPTTL   time.Duration
 	VerificationTokenTTL time.Duration
 
 	// Email (Brevo)
@@ -84,7 +85,7 @@ func LoadConfig() (*Config, error) {
 	brevoAPIKey := getEnv("BREVO_API_KEY", "")
 	brevoFromEmail := getEnv("BREVO_FROM_EMAIL", "olivergot26@gmail.com")
 	brevoFromName := getEnv("BREVO_FROM_NAME", "WAAP")
-	verificationTokenTTL := getEnvAsDuration("VERIFICATION_TOKEN_TTL", 5*time.Minute)
+	verificationOTPTTL := getEnvAsDuration("VERIFICATION_OTP_TTL", getEnvAsDuration("VERIFICATION_TOKEN_TTL", 5*time.Minute))
 
 	jwtSecret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	if jwtSecret == "" {
@@ -112,7 +113,8 @@ func LoadConfig() (*Config, error) {
 		DatabaseURL:          dbURL,
 		AutoMigrate:          autoMigrate,
 		JWTSecret:            jwtSecret,
-		VerificationTokenTTL: verificationTokenTTL,
+		VerificationOTPTTL:   verificationOTPTTL,
+		VerificationTokenTTL: verificationOTPTTL,
 		BrevoAPIKey:          brevoAPIKey,
 		BrevoFromEmail:       brevoFromEmail,
 		BrevoFromName:        brevoFromName,

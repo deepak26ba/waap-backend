@@ -221,7 +221,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/user.UserResponse"
+                                            "$ref": "#/definitions/user.RegisterResponse"
                                         }
                                     }
                                 }
@@ -296,7 +296,7 @@ const docTemplate = `{
                 "tags": [
                     "Auth"
                 ],
-                "summary": "Resend verification email for an unverified account",
+                "summary": "Resend verification email with a fresh OTP for an unverified account",
                 "parameters": [
                     {
                         "description": "Resend Verification Payload",
@@ -377,10 +377,10 @@ const docTemplate = `{
                 "tags": [
                     "Auth"
                 ],
-                "summary": "Verify user email address with verification token",
+                "summary": "Verify user email address with 6-digit OTP",
                 "parameters": [
                     {
-                        "description": "Email Verification Payload",
+                        "description": "Email Verification Payload with OTP",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -410,6 +410,24 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
                         "schema": {
                             "allOf": [
                                 {
@@ -932,6 +950,17 @@ const docTemplate = `{
                 }
             }
         },
+        "user.RegisterResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/user.UserResponse"
+                }
+            }
+        },
         "user.ResendVerificationInput": {
             "type": "object",
             "required": [
@@ -992,10 +1021,14 @@ const docTemplate = `{
         "user.VerifyEmailInput": {
             "type": "object",
             "required": [
-                "token"
+                "email",
+                "otp"
             ],
             "properties": {
-                "token": {
+                "email": {
+                    "type": "string"
+                },
+                "otp": {
                     "type": "string"
                 }
             }

@@ -95,19 +95,19 @@ func (m *mockUserRepository) MarkUserEmailVerified(ctx context.Context, id uuid.
 
 type mockEmailSender struct {
 	sentEmails []struct {
-		Email, Name, Token string
+		Email, Name, OTP string
 	}
 	err error
 }
 
-func (m *mockEmailSender) SendVerificationEmail(ctx context.Context, toEmail, toName, token string) error {
+func (m *mockEmailSender) SendVerificationEmail(ctx context.Context, toEmail, toName, otp string) error {
 	if m.err != nil {
 		return m.err
 	}
-	m.sentEmails = append(m.sentEmails, struct{ Email, Name, Token string }{
+	m.sentEmails = append(m.sentEmails, struct{ Email, Name, OTP string }{
 		Email: toEmail,
 		Name:  toName,
-		Token: token,
+		OTP:   otp,
 	})
 	return nil
 }
@@ -140,19 +140,22 @@ func TestUserService_Register(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil response")
 		}
-		if res.Email != "test@example.com" {
-			t.Errorf("expected email test@example.com, got %s", res.Email)
+		if res.Message != "Registration successful. Please enter the OTP sent to your email to activate your account." {
+			t.Errorf("unexpected message: %s", res.Message)
 		}
-		if res.FullName != "John Doe" {
-			t.Errorf("expected full name John Doe, got %s", res.FullName)
+		if res.User.Email != "test@example.com" {
+			t.Errorf("expected email test@example.com, got %s", res.User.Email)
 		}
-		if res.Role != "customer" {
-			t.Errorf("expected role customer, got %s", res.Role)
+		if res.User.FullName != "John Doe" {
+			t.Errorf("expected full name John Doe, got %s", res.User.FullName)
 		}
-		if res.PhoneNumber == nil || *res.PhoneNumber != phone {
-			t.Errorf("expected phone %s, got %v", phone, res.PhoneNumber)
+		if res.User.Role != "customer" {
+			t.Errorf("expected role customer, got %s", res.User.Role)
 		}
-		if res.EmailVerified {
+		if res.User.PhoneNumber == nil || *res.User.PhoneNumber != phone {
+			t.Errorf("expected phone %s, got %v", phone, res.User.PhoneNumber)
+		}
+		if res.User.EmailVerified {
 			t.Error("expected newly registered user to not be verified yet")
 		}
 
@@ -164,20 +167,20 @@ func TestUserService_Register(t *testing.T) {
 		if sent.Email != "test@example.com" {
 			t.Errorf("expected recipient test@example.com, got %s", sent.Email)
 		}
-		if sent.Token == "" {
-			t.Error("expected non-empty verification token in email")
+		if sent.OTP == "" || len(sent.OTP) != 6 {
+			t.Errorf("expected 6-digit verification OTP in email, got %s", sent.OTP)
 		}
 
-		// Verify token was stored in memory store
-		expectedHash := hashVerificationToken(sent.Token)
+		// Verify OTP was stored in memory store
+		expectedHash := hashOTP(sent.OTP)
 		tokenStore.mu.RLock()
-		tokItem, exists := tokenStore.tokens[expectedHash]
+		otpItem, exists := tokenStore.otps[expectedHash]
 		tokenStore.mu.RUnlock()
 		if !exists {
-			t.Errorf("expected token hash %s to exist in token store", expectedHash)
+			t.Errorf("expected otp hash %s to exist in otp store", expectedHash)
 		}
-		if tokItem.userID != res.ID {
-			t.Errorf("expected token user ID %s, got %s", res.ID, tokItem.userID)
+		if otpItem.userID != res.User.ID {
+			t.Errorf("expected otp user ID %s, got %s", res.User.ID, otpItem.userID)
 		}
 	})
 
@@ -278,16 +281,16 @@ func TestUserService_EmailVerification(t *testing.T) {
 	if len(mailer.sentEmails) != 1 {
 		t.Fatalf("expected 1 sent email, got %d", len(mailer.sentEmails))
 	}
-	token := mailer.sentEmails[0].Token
+	otp := mailer.sentEmails[0].OTP
 
-	t.Run("Valid token marks user as email verified", func(t *testing.T) {
-		err := svc.VerifyEmail(ctx, token)
+	t.Run("Valid OTP and email marks user as email verified", func(t *testing.T) {
+		err := svc.VerifyEmail(ctx, "verify@example.com", otp)
 		if err != nil {
 			t.Fatalf("unexpected error verifying email: %v", err)
 		}
 
 		// Verify user status in repository
-		u, err := mock.GetByID(ctx, regRes.ID)
+		u, err := mock.GetByID(ctx, regRes.User.ID)
 		if err != nil {
 			t.Fatalf("failed to get user: %v", err)
 		}
@@ -296,7 +299,7 @@ func TestUserService_EmailVerification(t *testing.T) {
 		}
 
 		// Verify profile reflects email verified
-		prof, err := svc.GetProfile(ctx, regRes.ID)
+		prof, err := svc.GetProfile(ctx, regRes.User.ID)
 		if err != nil {
 			t.Fatalf("failed to get profile: %v", err)
 		}
@@ -305,10 +308,10 @@ func TestUserService_EmailVerification(t *testing.T) {
 		}
 	})
 
-	t.Run("Token cannot be reused", func(t *testing.T) {
-		err := svc.VerifyEmail(ctx, token)
+	t.Run("OTP cannot be reused", func(t *testing.T) {
+		err := svc.VerifyEmail(ctx, "verify@example.com", otp)
 		if err == nil {
-			t.Fatal("expected error on token reuse, got nil")
+			t.Fatal("expected error on otp reuse, got nil")
 		}
 
 		var apiErr *response.AppError
@@ -318,15 +321,15 @@ func TestUserService_EmailVerification(t *testing.T) {
 		if apiErr.StatusCode != 400 {
 			t.Errorf("expected status 400, got %d", apiErr.StatusCode)
 		}
-		if apiErr.Code != "TOKEN_ALREADY_USED" {
-			t.Errorf("expected code TOKEN_ALREADY_USED, got %s", apiErr.Code)
+		if apiErr.Code != "OTP_ALREADY_USED" {
+			t.Errorf("expected code OTP_ALREADY_USED, got %s", apiErr.Code)
 		}
 	})
 
-	t.Run("Invalid token is rejected", func(t *testing.T) {
-		err := svc.VerifyEmail(ctx, "completely-invalid-nonexistent-token")
+	t.Run("Invalid OTP is rejected", func(t *testing.T) {
+		err := svc.VerifyEmail(ctx, "verify@example.com", "000000")
 		if err == nil {
-			t.Fatal("expected error for invalid token, got nil")
+			t.Fatal("expected error for invalid otp, got nil")
 		}
 
 		var apiErr *response.AppError
@@ -336,15 +339,58 @@ func TestUserService_EmailVerification(t *testing.T) {
 		if apiErr.StatusCode != 400 {
 			t.Errorf("expected status 400, got %d", apiErr.StatusCode)
 		}
-		if apiErr.Code != "INVALID_TOKEN" {
-			t.Errorf("expected code INVALID_TOKEN, got %s", apiErr.Code)
+		if apiErr.Code != "INVALID_OTP" {
+			t.Errorf("expected code INVALID_OTP, got %s", apiErr.Code)
 		}
 	})
 
-	t.Run("Empty token is rejected", func(t *testing.T) {
-		err := svc.VerifyEmail(ctx, "   ")
+	t.Run("Empty OTP is rejected", func(t *testing.T) {
+		err := svc.VerifyEmail(ctx, "verify@example.com", "   ")
 		if err == nil {
-			t.Fatal("expected error for empty token, got nil")
+			t.Fatal("expected error for empty otp, got nil")
+		}
+
+		var apiErr *response.AppError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("expected AppError, got %T", err)
+		}
+		if apiErr.StatusCode != 422 {
+			t.Errorf("expected status 422, got %d", apiErr.StatusCode)
+		}
+	})
+
+	t.Run("Empty email is rejected", func(t *testing.T) {
+		err := svc.VerifyEmail(ctx, "   ", "123456")
+		if err == nil {
+			t.Fatal("expected error for empty email, got nil")
+		}
+
+		var apiErr *response.AppError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("expected AppError, got %T", err)
+		}
+		if apiErr.StatusCode != 422 {
+			t.Errorf("expected status 422, got %d", apiErr.StatusCode)
+		}
+	})
+
+	t.Run("Mismatched email is rejected", func(t *testing.T) {
+		// Register another fresh user to have a valid unconsumed otp
+		otherReg, err := svc.Register(ctx, RegisterInput{
+			Email:    "another@example.com",
+			Password: "ValidPassword123",
+			FullName: "Another User",
+		})
+		if err != nil {
+			t.Fatalf("failed to register: %v", err)
+		}
+		_ = otherReg
+		anotherOTP := mailer.sentEmails[len(mailer.sentEmails)-1].OTP
+
+		// Attempt to verify with wrong email
+		err = svc.VerifyEmail(ctx, "wrongemail@example.com", anotherOTP)
+		if err == nil {
+			t.Fatal("expected error for mismatched email, got nil")
 		}
 
 		var apiErr *response.AppError
@@ -354,10 +400,13 @@ func TestUserService_EmailVerification(t *testing.T) {
 		if apiErr.StatusCode != 400 {
 			t.Errorf("expected status 400, got %d", apiErr.StatusCode)
 		}
+		if apiErr.Code != "INVALID_OTP" {
+			t.Errorf("expected code INVALID_OTP, got %s", apiErr.Code)
+		}
 	})
 
-	t.Run("Expired token is rejected and deleted", func(t *testing.T) {
-		// Register a user with expired token
+	t.Run("Expired OTP is rejected and deleted", func(t *testing.T) {
+		// Register a user with expired otp
 		expiredUser, err := mock.Create(ctx, db.CreateUserParams{
 			Email:        "expired@example.com",
 			PasswordHash: "hashed",
@@ -368,13 +417,13 @@ func TestUserService_EmailVerification(t *testing.T) {
 			t.Fatalf("failed to create user: %v", err)
 		}
 
-		expiredRawToken := "expired-test-token-12345"
-		expiredHash := hashVerificationToken(expiredRawToken)
+		expiredRawOTP := "987654"
+		expiredHash := hashOTP(expiredRawOTP)
 		tokenStore.Store(expiredHash, expiredUser.ID, -1*time.Second)
 
-		err = svc.VerifyEmail(ctx, expiredRawToken)
+		err = svc.VerifyEmail(ctx, "expired@example.com", expiredRawOTP)
 		if err == nil {
-			t.Fatal("expected error for expired token, got nil")
+			t.Fatal("expected error for expired otp, got nil")
 		}
 
 		var apiErr *response.AppError
@@ -384,14 +433,14 @@ func TestUserService_EmailVerification(t *testing.T) {
 		if apiErr.StatusCode != 400 {
 			t.Errorf("expected status 400, got %d", apiErr.StatusCode)
 		}
-		if apiErr.Code != "TOKEN_EXPIRED" {
-			t.Errorf("expected code TOKEN_EXPIRED, got %s", apiErr.Code)
+		if apiErr.Code != "OTP_EXPIRED" {
+			t.Errorf("expected code OTP_EXPIRED, got %s", apiErr.Code)
 		}
 
 		// Second attempt should report invalid (purged)
-		err = svc.VerifyEmail(ctx, expiredRawToken)
+		err = svc.VerifyEmail(ctx, "expired@example.com", expiredRawOTP)
 		if err == nil {
-			t.Fatal("expected error for purged token, got nil")
+			t.Fatal("expected error for purged otp, got nil")
 		}
 	})
 }
@@ -415,32 +464,29 @@ func TestUserService_ResendVerificationEmail(t *testing.T) {
 		t.Fatalf("failed to register: %v", err)
 	}
 
-	initialToken := mailer.sentEmails[0].Token
+	initialOTP := mailer.sentEmails[len(mailer.sentEmails)-1].OTP
 
-	t.Run("Successfully resends verification email and invalidates old token", func(t *testing.T) {
+	t.Run("Successfully resends verification email and invalidates old OTP", func(t *testing.T) {
 		err := svc.ResendVerificationEmail(ctx, "resend@example.com")
 		if err != nil {
 			t.Fatalf("unexpected error resending verification: %v", err)
 		}
 
-		if len(mailer.sentEmails) != 2 {
-			t.Fatalf("expected 2 sent emails, got %d", len(mailer.sentEmails))
-		}
-		newToken := mailer.sentEmails[1].Token
-		if newToken == initialToken {
-			t.Error("expected fresh token on resend")
+		newOTP := mailer.sentEmails[len(mailer.sentEmails)-1].OTP
+		if newOTP == initialOTP {
+			t.Error("expected fresh OTP on resend")
 		}
 
-		// Verify old token was invalidated
-		err = svc.VerifyEmail(ctx, initialToken)
+		// Verify old OTP was invalidated
+		err = svc.VerifyEmail(ctx, "resend@example.com", initialOTP)
 		if err == nil {
-			t.Error("expected old token to be rejected after resend, got nil")
+			t.Error("expected old OTP to be rejected after resend, got nil")
 		}
 
-		// Verify new token works
-		err = svc.VerifyEmail(ctx, newToken)
+		// Verify new OTP works
+		err = svc.VerifyEmail(ctx, "resend@example.com", newOTP)
 		if err != nil {
-			t.Fatalf("expected new token to verify email: %v", err)
+			t.Fatalf("expected new OTP to verify email: %v", err)
 		}
 	})
 
@@ -634,8 +680,8 @@ func TestUserService_RefreshToken(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected valid access token: %v", err)
 		}
-		if claims.UserID != loginRes.ID {
-			t.Errorf("expected user ID %s, got %s", loginRes.ID, claims.UserID)
+		if claims.UserID != loginRes.User.ID {
+			t.Errorf("expected user ID %s, got %s", loginRes.User.ID, claims.UserID)
 		}
 	})
 
@@ -662,7 +708,7 @@ func TestUserService_RefreshToken(t *testing.T) {
 	})
 
 	t.Run("Rejects invalid signature refresh token", func(t *testing.T) {
-		badSecretTokens, _ := GenerateTokenPair(loginRes.ID, loginRes.Email, loginRes.Role, "wrong-secret-key", 15*time.Minute, 7*24*time.Hour)
+		badSecretTokens, _ := GenerateTokenPair(loginRes.User.ID, loginRes.User.Email, loginRes.User.Role, "wrong-secret-key", 15*time.Minute, 7*24*time.Hour)
 		_, err := svc.RefreshToken(ctx, badSecretTokens.RefreshToken)
 		if err == nil {
 			t.Fatal("expected error with wrong signature token, got nil")
@@ -704,12 +750,12 @@ func TestUserService_GetProfile(t *testing.T) {
 	}
 
 	t.Run("Returns profile for existing user", func(t *testing.T) {
-		prof, err := svc.GetProfile(ctx, reg.ID)
+		prof, err := svc.GetProfile(ctx, reg.User.ID)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if prof.ID != reg.ID {
-			t.Errorf("expected ID %s, got %s", reg.ID, prof.ID)
+		if prof.ID != reg.User.ID {
+			t.Errorf("expected ID %s, got %s", reg.User.ID, prof.ID)
 		}
 		if prof.Email != "profile@example.com" {
 			t.Errorf("expected email profile@example.com, got %s", prof.Email)

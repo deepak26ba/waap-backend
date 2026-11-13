@@ -29,16 +29,18 @@ func RegisterV1(r *gin.Engine, deps Dependencies) {
 		mailer = &email.NoopSender{}
 	}
 
-	verificationTTL := 5 * time.Minute
-	if deps.Config != nil && deps.Config.VerificationTokenTTL > 0 {
-		verificationTTL = deps.Config.VerificationTokenTTL
+	otpTTL := 5 * time.Minute
+	if deps.Config != nil && deps.Config.VerificationOTPTTL > 0 {
+		otpTTL = deps.Config.VerificationOTPTTL
+	} else if deps.Config != nil && deps.Config.VerificationTokenTTL > 0 {
+		otpTTL = deps.Config.VerificationTokenTTL
 	}
 
-	tokenStore := user.NewMemoryTokenStore(1 * time.Minute)
+	otpStore := user.NewMemoryOTPStore(1 * time.Minute)
 
 	// Domain module wiring
 	userRepo := user.NewRepository(deps.Queries)
-	userService := user.NewService(userRepo, tokenStore, mailer, deps.Log, jwtSecret, 15*time.Minute, 7*24*time.Hour, verificationTTL)
+	userService := user.NewService(userRepo, otpStore, mailer, deps.Log, jwtSecret, 15*time.Minute, 7*24*time.Hour, otpTTL)
 	userHandler := user.NewHandler(userService, deps.Log)
 
 	productRepo := product.NewRepository(deps.Queries)
