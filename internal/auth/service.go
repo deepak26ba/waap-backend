@@ -83,17 +83,21 @@ func NewService(queries db.Querier, jwtSecret string, accessTTL, refreshTTL time
 // Register handles validation, Bcrypt password hashing (cost 12), and database insertion.
 func (s *authService) Register(ctx context.Context, in RegisterInput) (*UserResponse, error) {
 	// 1. Sanitize and validate inputs
-	email := strings.ToLower(strings.TrimSpace(in.Email))
-	if email == "" {
+	rawEmail := strings.TrimSpace(in.Email)
+	if rawEmail == "" {
 		return nil, response.NewValidationError("validation failed", []response.FieldError{
 			{Field: "email", Message: "email is required"},
 		})
 	}
-	if _, err := mail.ParseAddress(email); err != nil {
+
+	// Strictly validate bare mailbox format (rejecting display-name formats like "Name <email>")
+	parsedAddr, err := mail.ParseAddress(rawEmail)
+	if err != nil || parsedAddr.Address != rawEmail {
 		return nil, response.NewValidationError("validation failed", []response.FieldError{
 			{Field: "email", Message: "invalid email format"},
 		})
 	}
+	email := strings.ToLower(parsedAddr.Address)
 
 	fullName := strings.TrimSpace(in.FullName)
 	if fullName == "" {
@@ -102,14 +106,15 @@ func (s *authService) Register(ctx context.Context, in RegisterInput) (*UserResp
 		})
 	}
 
-	if len(in.Password) < 8 {
+	passBytes := []byte(in.Password)
+	if len(passBytes) < 8 || len(passBytes) > 72 {
 		return nil, response.NewValidationError("validation failed", []response.FieldError{
-			{Field: "password", Message: "password must be at least 8 characters long"},
+			{Field: "password", Message: "password must be between 8 and 72 characters long"},
 		})
 	}
 
 	// 2. Pre-check for duplicate email
-	_, err := s.queries.GetUserByEmail(ctx, email)
+	_, err = s.queries.GetUserByEmail(ctx, email)
 	if err == nil {
 		return nil, response.NewConflictError("EMAIL_ALREADY_EXISTS", "a user with this email address already exists")
 	} else if !errors.Is(err, pgx.ErrNoRows) {
@@ -161,10 +166,16 @@ func (s *authService) Register(ctx context.Context, in RegisterInput) (*UserResp
 
 // Login validates user credentials and issues signed JWT access and refresh tokens.
 func (s *authService) Login(ctx context.Context, in LoginInput) (*LoginResponse, error) {
-	email := strings.ToLower(strings.TrimSpace(in.Email))
-	if email == "" || in.Password == "" {
+	rawEmail := strings.TrimSpace(in.Email)
+	if rawEmail == "" || in.Password == "" {
 		return nil, response.NewBadRequestError("INVALID_INPUT", "email and password are required")
 	}
+
+	parsedAddr, err := mail.ParseAddress(rawEmail)
+	if err != nil || parsedAddr.Address != rawEmail {
+		return nil, response.NewUnauthorizedError("invalid email or password")
+	}
+	email := strings.ToLower(parsedAddr.Address)
 
 	user, err := s.queries.GetUserByEmail(ctx, email)
 	if err != nil {
@@ -176,13 +187,13 @@ func (s *authService) Login(ctx context.Context, in LoginInput) (*LoginResponse,
 		return nil, response.NewInternalError(err)
 	}
 
-	if !user.IsActive {
-		return nil, response.NewForbiddenError("account has been deactivated")
-	}
-
-	// Verify provided password against stored bcrypt hash
+	// Verify provided password against stored bcrypt hash first (prevents account status enumeration)
 	if err := CheckPassword(user.PasswordHash, in.Password); err != nil {
 		return nil, response.NewUnauthorizedError("invalid email or password")
+	}
+
+	if !user.IsActive {
+		return nil, response.NewForbiddenError("account has been deactivated")
 	}
 
 	// Issue JWT token pair
@@ -227,7 +238,10 @@ func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (*T
 
 	user, err := s.queries.GetUserByID(ctx, claims.UserID)
 	if err != nil {
-		return nil, response.NewUnauthorizedError("user associated with token not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, response.NewUnauthorizedError("user associated with token not found")
+		}
+		return nil, response.NewInternalError(err)
 	}
 
 	if !user.IsActive {
@@ -236,4 +250,3 @@ func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (*T
 
 	return GenerateTokenPair(user.ID, user.Email, user.Role, s.jwtSecret, s.accessTTL, s.refreshTTL)
 }
-

@@ -2,11 +2,14 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
@@ -90,9 +93,19 @@ func registerAPIRoutes(r *gin.Engine, cfg *config.Config, queries *db.Queries, l
 		return
 	}
 
-	jwtSecret := "default-dev-secret-replace-in-production"
-	if cfg != nil && cfg.JWTSecret != "" {
-		jwtSecret = cfg.JWTSecret
+	jwtSecret := ""
+	if cfg != nil {
+		jwtSecret = strings.TrimSpace(cfg.JWTSecret)
+	}
+
+	if jwtSecret == "" {
+		if cfg != nil && cfg.Env == "production" {
+			if log != nil {
+				log.Fatal("Fatal security misconfiguration: JWT_SECRET must be configured in production")
+			}
+			panic("Fatal security misconfiguration: JWT_SECRET must be configured in production")
+		}
+		jwtSecret = "dev-insecure-secret-key-change-in-production-32b"
 	}
 
 	apiV1 := r.Group("/api/v1")
@@ -115,7 +128,11 @@ func registerAPIRoutes(r *gin.Engine, cfg *config.Config, queries *db.Queries, l
 				}
 				user, err := queries.GetUserByID(c.Request.Context(), userID)
 				if err != nil {
-					response.NotFound(c, response.ErrCodeNotFound, "user profile not found")
+					if errors.Is(err, pgx.ErrNoRows) {
+						response.NotFound(c, response.ErrCodeNotFound, "user profile not found")
+						return
+					}
+					response.InternalServerError(c, response.ErrCodeInternalServerError, "failed to retrieve user profile")
 					return
 				}
 				var phone *string

@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -149,6 +150,42 @@ func TestAuthService_Register(t *testing.T) {
 		}
 	})
 
+	t.Run("Long Password Validation (> 72 bytes)", func(t *testing.T) {
+		in := RegisterInput{
+			Email:    "longpass@example.com",
+			Password: strings.Repeat("A", 73),
+			FullName: "Long Pass",
+		}
+
+		_, err := svc.Register(ctx, in)
+		if err == nil {
+			t.Fatalf("expected validation error for password > 72 bytes")
+		}
+
+		var appErr *response.AppError
+		if !errors.As(err, &appErr) || appErr.StatusCode != 422 {
+			t.Errorf("expected 422 Unprocessable Entity, got %v", err)
+		}
+	})
+
+	t.Run("Display Name In Email Format Rejected", func(t *testing.T) {
+		in := RegisterInput{
+			Email:    "John Doe <john@example.com>",
+			Password: "validpassword123",
+			FullName: "John Doe",
+		}
+
+		_, err := svc.Register(ctx, in)
+		if err == nil {
+			t.Fatalf("expected validation error for display-name email format")
+		}
+
+		var appErr *response.AppError
+		if !errors.As(err, &appErr) || appErr.StatusCode != 422 {
+			t.Errorf("expected 422 Unprocessable Entity, got %v", err)
+		}
+	})
+
 	t.Run("Invalid Email Format", func(t *testing.T) {
 		in := RegisterInput{
 			Email:    "invalid-email-address",
@@ -250,8 +287,29 @@ func TestAuthService_Login(t *testing.T) {
 		}
 	})
 
-	t.Run("Inactive User Account Returns 403", func(t *testing.T) {
+	t.Run("Inactive User with Wrong Password Returns 401 (Prevent Status Enumeration)", func(t *testing.T) {
 		// Set user active flag to false
+		u := mock.usersByEmail["customer@example.com"]
+		u.IsActive = false
+		mock.usersByEmail["customer@example.com"] = u
+
+		in := LoginInput{
+			Email:    "customer@example.com",
+			Password: "WrongPassword123!",
+		}
+
+		_, err := svc.Login(ctx, in)
+		if err == nil {
+			t.Fatalf("expected error on inactive user with wrong password")
+		}
+
+		var appErr *response.AppError
+		if !errors.As(err, &appErr) || appErr.StatusCode != 401 {
+			t.Errorf("expected 401 Unauthorized (not 403), got %v", err)
+		}
+	})
+
+	t.Run("Inactive User with Correct Password Returns 403", func(t *testing.T) {
 		u := mock.usersByEmail["customer@example.com"]
 		u.IsActive = false
 		mock.usersByEmail["customer@example.com"] = u
@@ -312,5 +370,21 @@ func TestAuthService_RefreshToken(t *testing.T) {
 			t.Fatalf("expected error when passing access token as refresh token")
 		}
 	})
-}
 
+	t.Run("Refresh Token with Unknown User Returns 401", func(t *testing.T) {
+		unknownTokens, err := GenerateTokenPair(99999, "unknown@test.com", "customer", secret, 15*time.Minute, 7*24*time.Hour)
+		if err != nil {
+			t.Fatalf("failed to generate token: %v", err)
+		}
+
+		_, err = svc.RefreshToken(ctx, unknownTokens.RefreshToken)
+		if err == nil {
+			t.Fatalf("expected error for non-existent user refresh token")
+		}
+
+		var appErr *response.AppError
+		if !errors.As(err, &appErr) || appErr.StatusCode != 401 {
+			t.Errorf("expected 401 Unauthorized, got %v", err)
+		}
+	})
+}

@@ -73,10 +73,21 @@ func LoadConfig() (*Config, error) {
 	rateLimitRPS := getEnvAsFloat("RATE_LIMIT_RPS", 20.0)
 	rateLimitBurst := getEnvAsInt("RATE_LIMIT_BURST", 40)
 	autoMigrate := getEnvAsBool("DB_AUTO_MIGRATE", true)
+	env := getEnv("ENV", "development")
+
+	jwtSecret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if jwtSecret == "" {
+		if env == "production" {
+			return nil, fmt.Errorf("security configuration error: JWT_SECRET environment variable is required in production")
+		}
+		jwtSecret = "dev-insecure-secret-key-change-in-production-32b"
+	} else if len(jwtSecret) < 32 && env == "production" {
+		return nil, fmt.Errorf("security configuration error: JWT_SECRET in production must be at least 32 characters long")
+	}
 
 	cfg := &Config{
 		Port:               getEnv("PORT", "8080"),
-		Env:                getEnv("ENV", "development"),
+		Env:                env,
 		DBHost:             dbHost,
 		DBPort:             dbPort,
 		DBUser:             dbUser,
@@ -89,7 +100,7 @@ func LoadConfig() (*Config, error) {
 		DBMaxConnIdleTime:  dbMaxConnIdleTime,
 		DatabaseURL:        dbURL,
 		AutoMigrate:        autoMigrate,
-		JWTSecret:          getEnv("JWT_SECRET", "default-dev-secret-replace-in-production"),
+		JWTSecret:          jwtSecret,
 		CORSAllowedOrigins: corsOrigins,
 		MaxBodySizeBytes:   maxBodySizeBytes,
 		RateLimitRPS:       rateLimitRPS,

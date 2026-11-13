@@ -121,4 +121,3 @@ func GetUserEmail(c *gin.Context) (string, bool) {
 	email, ok := val.(string)
 	return email, ok
 }
-
