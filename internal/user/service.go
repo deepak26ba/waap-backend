@@ -2,6 +2,9 @@ package user
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,9 +17,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 
 	"waap-backend/pkg/db"
+	"waap-backend/pkg/email"
 	"waap-backend/pkg/response"
 )
 
@@ -24,8 +29,9 @@ const (
 	// BcryptCost12 is the required hashing cost factor specified in TICKET-06.
 	BcryptCost12 = 12
 
-	DefaultAccessTTL  = 15 * time.Minute
-	DefaultRefreshTTL = 7 * 24 * time.Hour
+	DefaultAccessTTL            = 15 * time.Minute
+	DefaultRefreshTTL           = 7 * 24 * time.Hour
+	DefaultVerificationTokenTTL = 24 * time.Hour
 )
 
 // Precomputed dummy bcrypt hash (cost 12) for constant-time password comparisons
@@ -38,32 +44,55 @@ type Service interface {
 	Login(ctx context.Context, in LoginInput) (*LoginResponse, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*TokenPair, error)
 	GetProfile(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
+	VerifyEmail(ctx context.Context, token string) error
 }
 
 type service struct {
-	repo       Repository
-	jwtSecret  string
-	accessTTL  time.Duration
-	refreshTTL time.Duration
+	repo                 Repository
+	mailer               email.Sender
+	log                  *zap.Logger
+	jwtSecret            string
+	accessTTL            time.Duration
+	refreshTTL           time.Duration
+	verificationTokenTTL time.Duration
 }
 
 // NewService constructs an instance of the user service.
-func NewService(repo Repository, jwtSecret string, accessTTL, refreshTTL time.Duration) Service {
+func NewService(
+	repo Repository,
+	mailer email.Sender,
+	log *zap.Logger,
+	jwtSecret string,
+	accessTTL, refreshTTL, verificationTokenTTL time.Duration,
+) Service {
+	if mailer == nil {
+		mailer = &email.NoopSender{}
+	}
+	if log == nil {
+		log = zap.NewNop()
+	}
 	if accessTTL <= 0 {
 		accessTTL = DefaultAccessTTL
 	}
 	if refreshTTL <= 0 {
 		refreshTTL = DefaultRefreshTTL
 	}
+	if verificationTokenTTL <= 0 {
+		verificationTokenTTL = DefaultVerificationTokenTTL
+	}
 	return &service{
-		repo:       repo,
-		jwtSecret:  jwtSecret,
-		accessTTL:  accessTTL,
-		refreshTTL: refreshTTL,
+		repo:                 repo,
+		mailer:               mailer,
+		log:                  log,
+		jwtSecret:            jwtSecret,
+		accessTTL:            accessTTL,
+		refreshTTL:           refreshTTL,
+		verificationTokenTTL: verificationTokenTTL,
 	}
 }
 
-// Register handles validation, Bcrypt password hashing (cost 12), and database insertion.
+// Register handles validation, Bcrypt password hashing (cost 12), database insertion,
+// secure verification token generation, and dispatching verification email.
 func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse, error) {
 	// 1. Sanitize and validate inputs
 	rawEmail := strings.TrimSpace(in.Email)
@@ -80,7 +109,7 @@ func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse
 			{Field: "email", Message: "invalid email format"},
 		})
 	}
-	email := strings.ToLower(parsedAddr.Address)
+	emailAddr := strings.ToLower(parsedAddr.Address)
 
 	fullName := strings.TrimSpace(in.FullName)
 	if fullName == "" {
@@ -97,7 +126,7 @@ func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse
 	}
 
 	// 2. Pre-check for duplicate email
-	_, err = s.repo.GetByEmail(ctx, email)
+	_, err = s.repo.GetByEmail(ctx, emailAddr)
 	if err == nil {
 		return nil, response.NewConflictError("EMAIL_ALREADY_EXISTS", "a user with this email address already exists")
 	} else if !errors.Is(err, pgx.ErrNoRows) {
@@ -117,7 +146,7 @@ func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse
 	}
 
 	u, err := s.repo.Create(ctx, db.CreateUserParams{
-		Email:        email,
+		Email:        emailAddr,
 		PasswordHash: hashedPassword,
 		FullName:     fullName,
 		Role:         "customer",
@@ -131,6 +160,28 @@ func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse
 		return nil, response.NewInternalError(errors.New("failed to register user"))
 	}
 
+	// 5. Generate secure verification token and store its SHA-256 hash
+	rawToken, tokenHash, err := generateVerificationToken()
+	if err != nil {
+		s.log.Error("failed to generate email verification token", zap.Error(err), zap.String("user_id", u.ID.String()))
+	} else {
+		expiresAt := time.Now().Add(s.verificationTokenTTL)
+		_, err = s.repo.CreateVerificationToken(ctx, db.CreateEmailVerificationTokenParams{
+			UserID:    u.ID,
+			TokenHash: tokenHash,
+			ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
+		})
+		if err != nil {
+			s.log.Error("failed to store email verification token", zap.Error(err), zap.String("user_id", u.ID.String()))
+		} else {
+			// 6. Deliver verification email via Brevo
+			// Sensitive token is passed to email transport, NEVER logged in application logs
+			if err := s.mailer.SendVerificationEmail(ctx, u.Email, u.FullName, rawToken); err != nil {
+				s.log.Error("failed to dispatch verification email", zap.Error(err), zap.String("user_id", u.ID.String()))
+			}
+		}
+	}
+
 	var resPhone *string
 	if u.PhoneNumber.Valid {
 		p := u.PhoneNumber.String
@@ -138,24 +189,25 @@ func (s *service) Register(ctx context.Context, in RegisterInput) (*UserResponse
 	}
 
 	return &UserResponse{
-		ID:          u.ID,
-		Email:       u.Email,
-		FullName:    u.FullName,
-		Role:        u.Role,
-		PhoneNumber: resPhone,
-		CreatedAt:   u.CreatedAt.Time,
+		ID:            u.ID,
+		Email:         u.Email,
+		FullName:      u.FullName,
+		Role:          u.Role,
+		PhoneNumber:   resPhone,
+		EmailVerified: u.EmailVerified,
+		CreatedAt:     u.CreatedAt.Time,
 	}, nil
 }
 
 // Login authenticates credentials, applies timing-safe dummy check on missing users, and returns JWT token pair.
 func (s *service) Login(ctx context.Context, in LoginInput) (*LoginResponse, error) {
-	email := strings.ToLower(strings.TrimSpace(in.Email))
-	if email == "" || in.Password == "" {
+	emailAddr := strings.ToLower(strings.TrimSpace(in.Email))
+	if emailAddr == "" || in.Password == "" {
 		return nil, response.NewUnauthorizedError("invalid email or password")
 	}
 
 	// 1. Fetch user by email
-	u, err := s.repo.GetByEmail(ctx, email)
+	u, err := s.repo.GetByEmail(ctx, emailAddr)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Anti-enumeration: execute dummy bcrypt check to neutralize timing side-channels
@@ -190,12 +242,13 @@ func (s *service) Login(ctx context.Context, in LoginInput) (*LoginResponse, err
 	return &LoginResponse{
 		TokenPair: *tokens,
 		User: UserResponse{
-			ID:          u.ID,
-			Email:       u.Email,
-			FullName:    u.FullName,
-			Role:        u.Role,
-			PhoneNumber: resPhone,
-			CreatedAt:   u.CreatedAt.Time,
+			ID:            u.ID,
+			Email:         u.Email,
+			FullName:      u.FullName,
+			Role:          u.Role,
+			PhoneNumber:   resPhone,
+			EmailVerified: u.EmailVerified,
+			CreatedAt:     u.CreatedAt.Time,
 		},
 	}, nil
 }
@@ -234,6 +287,56 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 	return GenerateTokenPair(u.ID, u.Email, u.Role, s.jwtSecret, s.accessTTL, s.refreshTTL)
 }
 
+// VerifyEmail validates the submitted verification token and marks user email as verified.
+func (s *service) VerifyEmail(ctx context.Context, rawToken string) error {
+	rawToken = strings.TrimSpace(rawToken)
+	if rawToken == "" {
+		return response.NewBadRequestError("INVALID_TOKEN", "verification token is required")
+	}
+
+	tokenHash := hashVerificationToken(rawToken)
+
+	record, err := s.repo.GetVerificationTokenByHash(ctx, tokenHash)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return response.NewBadRequestError("INVALID_TOKEN", "invalid verification token")
+		}
+		s.log.Error("database query failed for verification token", zap.Error(err))
+		return response.NewInternalError(errors.New("failed to verify email"))
+	}
+
+	if record.UsedAt.Valid {
+		return response.NewBadRequestError("TOKEN_ALREADY_USED", "verification token has already been used")
+	}
+
+	if !record.ExpiresAt.Valid || record.ExpiresAt.Time.Before(time.Now()) {
+		return response.NewBadRequestError("TOKEN_EXPIRED", "verification token has expired")
+	}
+
+	if err := s.repo.VerifyEmailTx(ctx, record.ID, record.UserID); err != nil {
+		s.log.Error("failed to mark email as verified", zap.Error(err), zap.String("user_id", record.UserID.String()))
+		return response.NewInternalError(errors.New("failed to verify email"))
+	}
+
+	s.log.Info("email verified successfully", zap.String("user_id", record.UserID.String()))
+	return nil
+}
+
+func generateVerificationToken() (string, string, error) {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", "", fmt.Errorf("failed to generate random token: %w", err)
+	}
+	rawToken := hex.EncodeToString(bytes)
+	tokenHash := hashVerificationToken(rawToken)
+	return rawToken, tokenHash, nil
+}
+
+func hashVerificationToken(rawToken string) string {
+	h := sha256.Sum256([]byte(rawToken))
+	return hex.EncodeToString(h[:])
+}
+
 // HashPassword hashes a plaintext password using bcrypt with cost 12.
 func HashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), BcryptCost12)
@@ -255,7 +358,7 @@ func CheckDummyPassword(password string) {
 }
 
 // GenerateTokenPair issues a short-lived access token and a longer-lived refresh token.
-func GenerateTokenPair(userID uuid.UUID, email, role, secret string, accessTTL, refreshTTL time.Duration) (*TokenPair, error) {
+func GenerateTokenPair(userID uuid.UUID, emailAddr, role, secret string, accessTTL, refreshTTL time.Duration) (*TokenPair, error) {
 	if secret == "" {
 		return nil, errors.New("jwt secret key cannot be empty")
 	}
@@ -267,7 +370,7 @@ func GenerateTokenPair(userID uuid.UUID, email, role, secret string, accessTTL, 
 	// 1. Build Access Token Claims
 	accessClaims := &Claims{
 		UserID:    userID,
-		Email:     email,
+		Email:     emailAddr,
 		Role:      role,
 		TokenType: TokenTypeAccess,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -285,7 +388,7 @@ func GenerateTokenPair(userID uuid.UUID, email, role, secret string, accessTTL, 
 	// 2. Build Refresh Token Claims
 	refreshClaims := &Claims{
 		UserID:    userID,
-		Email:     email,
+		Email:     emailAddr,
 		Role:      role,
 		TokenType: TokenTypeRefresh,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -351,11 +454,12 @@ func (s *service) GetProfile(ctx context.Context, userID uuid.UUID) (*UserRespon
 	}
 
 	return &UserResponse{
-		ID:          u.ID,
-		Email:       u.Email,
-		FullName:    u.FullName,
-		Role:        u.Role,
-		PhoneNumber: phone,
-		CreatedAt:   u.CreatedAt.Time,
+		ID:            u.ID,
+		Email:         u.Email,
+		FullName:      u.FullName,
+		Role:          u.Role,
+		PhoneNumber:   phone,
+		EmailVerified: u.EmailVerified,
+		CreatedAt:     u.CreatedAt.Time,
 	}, nil
 }

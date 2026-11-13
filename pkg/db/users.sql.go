@@ -12,6 +12,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createEmailVerificationToken = `-- name: CreateEmailVerificationToken :one
+INSERT INTO email_verification_tokens (
+    user_id,
+    token_hash,
+    expires_at
+) VALUES (
+    $1, $2, $3
+)
+RETURNING id, user_id, token_hash, expires_at, used_at, created_at
+`
+
+type CreateEmailVerificationTokenParams struct {
+	UserID    uuid.UUID          `json:"user_id"`
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+func (q *Queries) CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (EmailVerificationToken, error) {
+	row := q.db.QueryRow(ctx, createEmailVerificationToken, arg.UserID, arg.TokenHash, arg.ExpiresAt)
+	var i EmailVerificationToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
     email,
@@ -22,7 +53,7 @@ INSERT INTO users (
 ) VALUES (
     $1, $2, $3, $4, $5
 )
-RETURNING id, email, password_hash, full_name, role, phone_number, is_active, created_at, updated_at
+RETURNING id, email, password_hash, full_name, role, phone_number, is_active, created_at, updated_at, email_verified
 `
 
 type CreateUserParams struct {
@@ -52,12 +83,33 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailVerified,
+	)
+	return i, err
+}
+
+const getEmailVerificationTokenByHash = `-- name: GetEmailVerificationTokenByHash :one
+SELECT id, user_id, token_hash, expires_at, used_at, created_at FROM email_verification_tokens
+WHERE token_hash = $1
+LIMIT 1
+`
+
+func (q *Queries) GetEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (EmailVerificationToken, error) {
+	row := q.db.QueryRow(ctx, getEmailVerificationTokenByHash, tokenHash)
+	var i EmailVerificationToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, full_name, role, phone_number, is_active, created_at, updated_at FROM users
+SELECT id, email, password_hash, full_name, role, phone_number, is_active, created_at, updated_at, email_verified FROM users
 WHERE email = $1 LIMIT 1
 `
 
@@ -74,12 +126,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailVerified,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, full_name, role, phone_number, is_active, created_at, updated_at FROM users
+SELECT id, email, password_hash, full_name, role, phone_number, is_active, created_at, updated_at, email_verified FROM users
 WHERE id = $1 LIMIT 1
 `
 
@@ -96,6 +149,54 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailVerified,
+	)
+	return i, err
+}
+
+const markEmailVerificationTokenUsed = `-- name: MarkEmailVerificationTokenUsed :one
+UPDATE email_verification_tokens
+SET used_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, user_id, token_hash, expires_at, used_at, created_at
+`
+
+func (q *Queries) MarkEmailVerificationTokenUsed(ctx context.Context, id int64) (EmailVerificationToken, error) {
+	row := q.db.QueryRow(ctx, markEmailVerificationTokenUsed, id)
+	var i EmailVerificationToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const markUserEmailVerified = `-- name: MarkUserEmailVerified :one
+UPDATE users
+SET email_verified = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, email, password_hash, full_name, role, phone_number, is_active, created_at, updated_at, email_verified
+`
+
+func (q *Queries) MarkUserEmailVerified(ctx context.Context, id uuid.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, markUserEmailVerified, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.FullName,
+		&i.Role,
+		&i.PhoneNumber,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EmailVerified,
 	)
 	return i, err
 }
@@ -106,7 +207,7 @@ SET full_name = COALESCE($2, full_name),
     phone_number = COALESCE($3, phone_number),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, email, password_hash, full_name, role, phone_number, is_active, created_at, updated_at
+RETURNING id, email, password_hash, full_name, role, phone_number, is_active, created_at, updated_at, email_verified
 `
 
 type UpdateUserParams struct {
@@ -128,6 +229,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailVerified,
 	)
 	return i, err
 }

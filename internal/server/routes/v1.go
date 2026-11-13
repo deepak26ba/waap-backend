@@ -10,6 +10,7 @@ import (
 	"waap-backend/internal/middleware"
 	"waap-backend/internal/product"
 	"waap-backend/internal/user"
+	"waap-backend/pkg/email"
 	"waap-backend/pkg/response"
 )
 
@@ -21,9 +22,21 @@ func RegisterV1(r *gin.Engine, deps Dependencies) {
 
 	jwtSecret := resolveJWTSecret(deps)
 
+	var mailer email.Sender
+	if deps.Config != nil && deps.Config.BrevoAPIKey != "" {
+		mailer = email.NewBrevoSender(deps.Config.BrevoAPIKey, deps.Config.BrevoFromEmail, deps.Config.BrevoFromName)
+	} else {
+		mailer = &email.NoopSender{}
+	}
+
+	verificationTTL := 24 * time.Hour
+	if deps.Config != nil && deps.Config.VerificationTokenTTL > 0 {
+		verificationTTL = deps.Config.VerificationTokenTTL
+	}
+
 	// Domain module wiring
-	userRepo := user.NewRepository(deps.Queries)
-	userService := user.NewService(userRepo, jwtSecret, 15*time.Minute, 7*24*time.Hour)
+	userRepo := user.NewRepository(deps.Pool, deps.Queries)
+	userService := user.NewService(userRepo, mailer, deps.Log, jwtSecret, 15*time.Minute, 7*24*time.Hour, verificationTTL)
 	userHandler := user.NewHandler(userService, deps.Log)
 
 	productRepo := product.NewRepository(deps.Queries)
@@ -42,6 +55,7 @@ func RegisterV1(r *gin.Engine, deps Dependencies) {
 			auth.POST("/register", userHandler.Register)
 			auth.POST("/login", userHandler.Login)
 			auth.POST("/refresh", userHandler.Refresh)
+			auth.POST("/verify-email", userHandler.VerifyEmail)
 		}
 
 		// Public Product Catalog Routes
