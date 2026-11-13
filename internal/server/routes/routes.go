@@ -13,7 +13,7 @@ import (
 type Dependencies struct {
 	Config  *config.Config
 	Pool    *pgxpool.Pool
-	Queries *db.Queries
+	Queries db.Querier
 	Log     *zap.Logger
 }
 
