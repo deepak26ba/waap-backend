@@ -23,9 +23,6 @@ services:
       - key: BREVO_API_KEY
         sync: false
 
-      - key: BREVO_FROM_EMAIL
-        value: olivergot26@gmail.com
-
       - key: BREVO_FROM_NAME
         value: WAAP
 
