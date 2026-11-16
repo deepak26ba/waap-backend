@@ -3,7 +3,9 @@ package user
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,16 +108,15 @@ func (m *mockUserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, p
 }
 
 type mockEmailSender struct {
-	sentEmails []struct {
-		Email, Name, OTP string
-	}
-	sentResetEmails []struct {
-		Email, Name, Token string
-	}
-	err error
+	mu              sync.Mutex
+	sentEmails      []struct{ Email, Name, OTP string }
+	sentResetEmails []struct{ Email, Name, Token string }
+	err             error
 }
 
 func (m *mockEmailSender) SendVerificationEmail(ctx context.Context, toEmail, toName, otp string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.err != nil {
 		return m.err
 	}
@@ -128,6 +129,8 @@ func (m *mockEmailSender) SendVerificationEmail(ctx context.Context, toEmail, to
 }
 
 func (m *mockEmailSender) SendPasswordResetEmail(ctx context.Context, toEmail, toName, token string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.err != nil {
 		return m.err
 	}
@@ -137,6 +140,14 @@ func (m *mockEmailSender) SendPasswordResetEmail(ctx context.Context, toEmail, t
 		Token: token,
 	})
 	return nil
+}
+
+func (m *mockEmailSender) getSentResetEmails() []struct{ Email, Name, Token string } {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	res := make([]struct{ Email, Name, Token string }, len(m.sentResetEmails))
+	copy(res, m.sentResetEmails)
+	return res
 }
 
 var _ Repository = (*mockUserRepository)(nil)
@@ -942,26 +953,42 @@ func TestUserService_ForgotPassword(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(mailer.sentResetEmails) != 1 {
-			t.Fatalf("expected 1 reset email sent, got %d", len(mailer.sentResetEmails))
+		var sent []struct{ Email, Name, Token string }
+		for start := time.Now(); time.Since(start) < 2*time.Second; {
+			sent = mailer.getSentResetEmails()
+			if len(sent) > 0 {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
 		}
-		sent := mailer.sentResetEmails[0]
-		if sent.Email != "forgot@example.com" {
-			t.Errorf("expected recipient forgot@example.com, got %s", sent.Email)
+		if len(sent) != 1 {
+			t.Fatalf("expected 1 reset email sent, got %d", len(sent))
 		}
-		if sent.Token == "" {
+		if sent[0].Email != "forgot@example.com" {
+			t.Errorf("expected recipient forgot@example.com, got %s", sent[0].Email)
+		}
+		if sent[0].Token == "" {
 			t.Error("expected non-empty reset token")
 		}
 	})
 
 	t.Run("Non-existent email returns success without sending email (anti-enumeration)", func(t *testing.T) {
-		countBefore := len(mailer.sentResetEmails)
+		countBefore := len(mailer.getSentResetEmails())
 		err := svc.ForgotPassword(ctx, "doesnotexist@example.com")
 		if err != nil {
 			t.Fatalf("expected nil error for anti-enumeration, got %v", err)
 		}
-		if len(mailer.sentResetEmails) != countBefore {
+		if len(mailer.getSentResetEmails()) != countBefore {
 			t.Errorf("expected no additional email sent for unknown address")
+		}
+	})
+
+	t.Run("Delivery failure does not leak account existence and returns success", func(t *testing.T) {
+		failingMailer := &mockEmailSender{err: errors.New("brevo service unavailable")}
+		failSvc := NewService(mock, nil, failingMailer, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
+		err := failSvc.ForgotPassword(ctx, "forgot@example.com")
+		if err != nil {
+			t.Fatalf("expected nil error even if delivery fails to prevent account enumeration, got: %v", err)
 		}
 	})
 
@@ -1031,7 +1058,18 @@ func TestUserService_ResetPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to request forgot password: %v", err)
 	}
-	resetToken := mailer.sentResetEmails[len(mailer.sentResetEmails)-1].Token
+	var sentReset []struct{ Email, Name, Token string }
+	for start := time.Now(); time.Since(start) < 2*time.Second; {
+		sentReset = mailer.getSentResetEmails()
+		if len(sentReset) > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(sentReset) == 0 {
+		t.Fatal("expected reset email to be sent")
+	}
+	resetToken := sentReset[len(sentReset)-1].Token
 
 	t.Run("Successfully resets password, revokes existing refresh tokens, and allows new login", func(t *testing.T) {
 		newPassword := "NewStrongPassword123!"
@@ -1089,6 +1127,124 @@ func TestUserService_ResetPassword(t *testing.T) {
 		}
 		if apiErr.StatusCode != 400 || apiErr.Code != "TOKEN_ALREADY_USED" {
 			t.Errorf("expected 400 TOKEN_ALREADY_USED, got %d %s", apiErr.StatusCode, apiErr.Code)
+		}
+	})
+
+	t.Run("Concurrent password reset requests with same token - only one succeeds", func(t *testing.T) {
+		err := svc.ForgotPassword(ctx, "resetuser@example.com")
+		if err != nil {
+			t.Fatalf("failed to request forgot password: %v", err)
+		}
+		var sent []struct{ Email, Name, Token string }
+		for start := time.Now(); time.Since(start) < 2*time.Second; {
+			sent = mailer.getSentResetEmails()
+			if len(sent) > len(sentReset) {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		concurrentToken := sent[len(sent)-1].Token
+
+		var wg sync.WaitGroup
+		startSignal := make(chan struct{})
+		results := make([]error, 2)
+
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				<-startSignal
+				results[idx] = svc.ResetPassword(ctx, concurrentToken, fmt.Sprintf("ConcurrentPass%d!", idx))
+			}(i)
+		}
+
+		close(startSignal)
+		wg.Wait()
+
+		successCount := 0
+		conflictCount := 0
+		for _, res := range results {
+			if res == nil {
+				successCount++
+			} else {
+				var appErr *response.AppError
+				if errors.As(res, &appErr) && appErr.Code == "TOKEN_ALREADY_USED" {
+					conflictCount++
+				}
+			}
+		}
+
+		if successCount != 1 || conflictCount != 1 {
+			t.Fatalf("expected exactly 1 success and 1 TOKEN_ALREADY_USED rejection, got %d successes and %d conflicts (errors: %v)", successCount, conflictCount, results)
+		}
+	})
+
+	t.Run("Revocation cutoff persists across server restarts", func(t *testing.T) {
+		curLogin, err := svc.Login(ctx, LoginInput{
+			Email:    "resetuser@example.com",
+			Password: "ConcurrentPass0!",
+		})
+		if err != nil {
+			curLogin, err = svc.Login(ctx, LoginInput{
+				Email:    "resetuser@example.com",
+				Password: "ConcurrentPass1!",
+			})
+			if err != nil {
+				t.Fatalf("failed to login: %v", err)
+			}
+		}
+		curRefreshToken := curLogin.RefreshToken
+
+		// Verify refresh token works initially
+		_, err = svc.RefreshToken(ctx, curRefreshToken)
+		if err != nil {
+			t.Fatalf("expected refresh token to work: %v", err)
+		}
+
+		// Request and perform password reset
+		err = svc.ForgotPassword(ctx, "resetuser@example.com")
+		if err != nil {
+			t.Fatalf("forgot password failed: %v", err)
+		}
+		var sent []struct{ Email, Name, Token string }
+		curSentCount := len(mailer.getSentResetEmails())
+		for start := time.Now(); time.Since(start) < 2*time.Second; {
+			sent = mailer.getSentResetEmails()
+			if len(sent) > curSentCount {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		token := sent[len(sent)-1].Token
+
+		restartedPassword := "RestartPassword999!"
+		err = svc.ResetPassword(ctx, token, restartedPassword)
+		if err != nil {
+			t.Fatalf("reset password failed: %v", err)
+		}
+
+		// Simulate server restart: create brand new service instance with fresh empty in-memory store
+		newResetStore := NewMemoryPasswordResetStore(1 * time.Minute)
+		restartedSvc := NewService(mock, nil, mailer, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
+		restartedSvc.SetPasswordResetStore(newResetStore)
+
+		// Old refresh token must STILL be rejected due to persisted UpdatedAt in repository
+		_, err = restartedSvc.RefreshToken(ctx, curRefreshToken)
+		if err == nil {
+			t.Fatal("expected pre-reset refresh token to be rejected after server restart, got nil")
+		}
+
+		// Logging in after reset works on restarted server
+		postRestartLogin, err := restartedSvc.Login(ctx, LoginInput{
+			Email:    "resetuser@example.com",
+			Password: restartedPassword,
+		})
+		if err != nil {
+			t.Fatalf("failed to login after restart: %v", err)
+		}
+		_, err = restartedSvc.RefreshToken(ctx, postRestartLogin.RefreshToken)
+		if err != nil {
+			t.Fatalf("expected new refresh token to work after server restart: %v", err)
 		}
 	})
 

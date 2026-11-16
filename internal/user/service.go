@@ -320,6 +320,17 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 	if s.passwordResetStore.IsSessionRevoked(u.ID, issuedAt, claims.IssuedAtUnixNano) {
 		return nil, response.NewUnauthorizedError("session has been revoked due to password reset, please log in again")
 	}
+	if u.UpdatedAt.Valid && !u.UpdatedAt.Time.IsZero() {
+		// Persisted revocation check across server restarts: tokens issued strictly before the last password update
+		cutoffNano := u.UpdatedAt.Time.UnixNano()
+		if claims.IssuedAtUnixNano > 0 {
+			if claims.IssuedAtUnixNano < cutoffNano {
+				return nil, response.NewUnauthorizedError("session has been revoked due to password reset, please log in again")
+			}
+		} else if issuedAt.Before(u.UpdatedAt.Time) {
+			return nil, response.NewUnauthorizedError("session has been revoked due to password reset, please log in again")
+		}
+	}
 
 	// 5. Issue fresh token pair
 	return GenerateTokenPair(u.ID, u.Email, u.Role, s.jwtSecret, s.accessTTL, s.refreshTTL)
@@ -527,13 +538,17 @@ func (s *service) ForgotPassword(ctx context.Context, rawEmail string) error {
 	// Store only the secure hash of the token
 	s.passwordResetStore.Store(tokenHash, u.ID, s.passwordResetTTL)
 
-	// Send through configured email provider
-	if err := s.mailer.SendPasswordResetEmail(ctx, u.Email, u.FullName, rawToken); err != nil {
-		s.log.Error("failed to dispatch password reset email", zap.Error(err), zap.String("user_id", u.ID.String()))
-		return response.NewInternalError(errors.New("failed to send password reset email"))
-	}
+	// Send through configured email provider asynchronously to ensure comparable response timing
+	// and prevent account enumeration via delivery status or network latency
+	go func(toEmail, toName, token string) {
+		sendCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := s.mailer.SendPasswordResetEmail(sendCtx, toEmail, toName, token); err != nil {
+			s.log.Error("failed to dispatch password reset email", zap.Error(err), zap.String("email", toEmail))
+		}
+	}(u.Email, u.FullName, rawToken)
 
-	s.log.Info("password reset email dispatched", zap.String("user_id", u.ID.String()))
+	s.log.Info("password reset requested", zap.String("user_id", u.ID.String()))
 	return nil
 }
 
@@ -554,9 +569,9 @@ func (s *service) ResetPassword(ctx context.Context, rawToken, newPassword strin
 		})
 	}
 
-	// 1. Validate token before changing password
+	// 1. Atomically reserve token before changing password to prevent concurrent reuse
 	tokenHash := hashResetToken(rawToken)
-	userID, err := s.passwordResetStore.Validate(tokenHash)
+	userID, err := s.passwordResetStore.Reserve(tokenHash)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrResetTokenAlreadyUsed):
@@ -571,21 +586,20 @@ func (s *service) ResetPassword(ctx context.Context, rawToken, newPassword strin
 	// 2. Hash new password using Bcrypt with cost 12
 	hashedPassword, err := HashPassword(newPassword)
 	if err != nil {
+		s.passwordResetStore.Release(tokenHash)
 		s.log.Error("failed to hash new password", zap.Error(err))
 		return response.NewInternalError(errors.New("failed to process password update"))
 	}
 
 	// 3. Update password in database
 	if _, err := s.repo.UpdatePassword(ctx, userID, hashedPassword); err != nil {
+		s.passwordResetStore.Release(tokenHash)
 		s.log.Error("failed to update password in database", zap.Error(err), zap.String("user_id", userID.String()))
 		return response.NewInternalError(errors.New("failed to reset password"))
 	}
 
 	// 4. Invalidate existing sessions/refresh tokens after successful password reset
 	s.passwordResetStore.RevokeSessions(userID)
-
-	// 5. Consume token to prevent reuse (single-use)
-	_ = s.passwordResetStore.Consume(tokenHash)
 
 	s.log.Info("password reset successfully", zap.String("user_id", userID.String()))
 	return nil

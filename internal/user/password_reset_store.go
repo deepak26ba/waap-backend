@@ -26,6 +26,8 @@ type resetTokenItem struct {
 type PasswordResetStore interface {
 	Store(tokenHash string, userID uuid.UUID, ttl time.Duration)
 	Validate(tokenHash string) (uuid.UUID, error)
+	Reserve(tokenHash string) (uuid.UUID, error)
+	Release(tokenHash string)
 	Consume(tokenHash string) error
 	DeleteByUserID(userID uuid.UUID)
 	RevokeSessions(userID uuid.UUID)
@@ -108,6 +110,43 @@ func (s *MemoryPasswordResetStore) Validate(tokenHash string) (uuid.UUID, error)
 	}
 
 	return item.userID, nil
+}
+
+// Reserve atomically marks the token as used/in-flight and returns the user ID.
+// If the token is already used, expired, or non-existent, it returns the appropriate error.
+func (s *MemoryPasswordResetStore) Reserve(tokenHash string) (uuid.UUID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	item, exists := s.tokens[tokenHash]
+	if !exists {
+		return uuid.Nil, ErrResetTokenNotFound
+	}
+
+	if item.used {
+		return uuid.Nil, ErrResetTokenAlreadyUsed
+	}
+
+	if time.Now().After(item.expiresAt) {
+		delete(s.tokens, tokenHash)
+		return uuid.Nil, ErrResetTokenExpired
+	}
+
+	item.used = true
+	s.tokens[tokenHash] = item
+	return item.userID, nil
+}
+
+// Release unmarks the token as used if an error occurred during subsequent operations before completion.
+func (s *MemoryPasswordResetStore) Release(tokenHash string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	item, exists := s.tokens[tokenHash]
+	if exists && item.used {
+		item.used = false
+		s.tokens[tokenHash] = item
+	}
 }
 
 // Consume marks the reset token as consumed, enforcing single-use.
