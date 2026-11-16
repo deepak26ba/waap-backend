@@ -86,4 +86,3 @@ func TestMemoryPasswordResetStore(t *testing.T) {
 		t.Error("expected session issued after reset to remain valid")
 	}
 }
-
