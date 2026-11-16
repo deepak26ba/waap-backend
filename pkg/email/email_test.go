@@ -101,3 +101,28 @@ func TestBrevoSender_EscapesHTMLInName(t *testing.T) {
 		t.Errorf("expected escaped HTML &lt;script&gt; in email body")
 	}
 }
+
+func TestBrevoSender_SendPasswordResetEmail(t *testing.T) {
+	var receivedPayload brevoEmailPayload
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&receivedPayload)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"messageId": "<test-reset@brevo.com>"}`))
+	}))
+	defer server.Close()
+
+	sender := NewBrevoSender("test-api-key", "noreply@example.com", "TestApp")
+	sender.SetBaseURL(server.URL)
+
+	err := sender.SendPasswordResetEmail(context.Background(), "user@example.com", "Reset User", "secret-reset-token-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedPayload.Subject != "Reset Your WAAP Password" {
+		t.Errorf("expected subject 'Reset Your WAAP Password', got %s", receivedPayload.Subject)
+	}
+	if !strings.Contains(receivedPayload.HTMLContent, "secret-reset-token-123") {
+		t.Errorf("expected email body to contain reset token")
+	}
+}

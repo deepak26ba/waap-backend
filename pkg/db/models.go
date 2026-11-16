@@ -128,14 +128,15 @@ type ProductVariant struct {
 }
 
 type User struct {
-	ID            uuid.UUID          `json:"id"`
-	Email         string             `json:"email"`
-	PasswordHash  string             `json:"password_hash"`
-	FullName      string             `json:"full_name"`
-	Role          string             `json:"role"`
-	PhoneNumber   pgtype.Text        `json:"phone_number"`
-	IsActive      bool               `json:"is_active"`
-	EmailVerified bool               `json:"email_verified"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID                uuid.UUID          `json:"id"`
+	Email             string             `json:"email"`
+	PasswordHash      string             `json:"password_hash"`
+	FullName          string             `json:"full_name"`
+	Role              string             `json:"role"`
+	PhoneNumber       pgtype.Text        `json:"phone_number"`
+	IsActive          bool               `json:"is_active"`
+	EmailVerified     bool               `json:"email_verified"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	PasswordChangedAt pgtype.Timestamptz `json:"password_changed_at"`
 }

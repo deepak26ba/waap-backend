@@ -156,6 +156,60 @@ func (h *Handler) ResendVerification(c *gin.Context) {
 	})
 }
 
+// ForgotPassword godoc
+// @Summary Request password reset email
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body ForgotPasswordInput true "Forgot Password Payload"
+// @Success 200 {object} response.Envelope{data=ForgotPasswordResponse}
+// @Failure 400 {object} response.Envelope{error=response.APIError}
+// @Failure 422 {object} response.Envelope{error=response.APIError}
+// @Router /auth/forgot-password [post]
+func (h *Handler) ForgotPassword(c *gin.Context) {
+	var in ForgotPasswordInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.BadRequest(c, "INVALID_REQUEST_BODY", "malformed or missing JSON request body: email is required")
+		return
+	}
+
+	if err := h.service.ForgotPassword(c.Request.Context(), in.Email); err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.OK(c, ForgotPasswordResponse{
+		Message: "if that email address is registered, a password reset link has been sent",
+	})
+}
+
+// ResetPassword godoc
+// @Summary Reset password using time-limited token
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body ResetPasswordInput true "Reset Password Payload"
+// @Success 200 {object} response.Envelope{data=ResetPasswordResponse}
+// @Failure 400 {object} response.Envelope{error=response.APIError}
+// @Failure 422 {object} response.Envelope{error=response.APIError}
+// @Router /auth/reset-password [post]
+func (h *Handler) ResetPassword(c *gin.Context) {
+	var in ResetPasswordInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.BadRequest(c, "INVALID_REQUEST_BODY", "malformed or missing JSON request body: token and new_password are required")
+		return
+	}
+
+	if err := h.service.ResetPassword(c.Request.Context(), in.Token, in.NewPassword); err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.OK(c, ResetPasswordResponse{
+		Message: "password has been successfully reset",
+	})
+}
+
 // GetProfile godoc
 // @Summary Get current user profile
 // @Tags Users

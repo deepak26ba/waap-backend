@@ -14,6 +14,7 @@ import (
 // Sender abstracts transactional email delivery.
 type Sender interface {
 	SendVerificationEmail(ctx context.Context, toEmail, toName, otp string) error
+	SendPasswordResetEmail(ctx context.Context, toEmail, toName, resetToken string) error
 }
 
 // BrevoSender delivers transactional emails using the Brevo (Sendinblue) v3 API.
@@ -211,13 +212,143 @@ func (s *BrevoSender) SendVerificationEmail(ctx context.Context, toEmail, toName
     </tr>
   </table>
 </body>
-</html>
+</html>`, html.EscapeString(toName), otp)
+
+	subject := fmt.Sprintf("Your WAAP Verification OTP: %s", otp)
+	return s.sendEmail(ctx, toEmail, toName, subject, htmlContent)
+}
+
+// SendPasswordResetEmail delivers a password reset token via Brevo.
+func (s *BrevoSender) SendPasswordResetEmail(ctx context.Context, toEmail, toName, resetToken string) error {
+	if s.apiKey == "" {
+		return fmt.Errorf("brevo API key is not configured")
+	}
+
+	htmlContent := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
+  <title>Reset Your WAAP Password</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      supported-color-schemes: light dark;
+    }
+    @media (prefers-color-scheme: dark) {
+      body, .email-bg { background-color: #0b0f19 !important; }
+      .email-card { background-color: #1e293b !important; border-color: #334155 !important; }
+      .email-title { color: #f8fafc !important; }
+      .email-text { color: #cbd5e1 !important; }
+      .email-name { color: #ffffff !important; }
+      .token-box { background-color: #0f172a !important; border-color: #334155 !important; }
+      .token-pill { background-color: #1e1b4b !important; border-color: #4338ca !important; }
+      .token-text { color: #a5b4fc !important; }
+      .token-hint { color: #94a3b8 !important; }
+      .warning-card { background-color: #2c0b0e !important; border-color: #881337 !important; border-left-color: #f43f5e !important; }
+      .warning-heading { color: #fda4af !important; }
+      .warning-body { color: #fecdd3 !important; }
+      .sub-text { color: #64748b !important; }
+      .footer-card { background-color: #0f172a !important; border-top-color: #334155 !important; }
+      .footer-title { color: #94a3b8 !important; }
+      .footer-text { color: #64748b !important; }
+    }
+  </style>
+</head>
+<body class="email-bg" style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;">
+  <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" class="email-bg" style="background-color: #f1f5f9; padding: 48px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" class="email-card" style="max-width: 560px; width: 100%%; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01); border: 1px solid #e2e8f0;">
+          <tr>
+            <td style="height: 5px; background: linear-gradient(90deg, #4f46e5 0%%, #7c3aed 50%%, #06b6d4 100%%); line-height: 5px; font-size: 1px;">&nbsp;</td>
+          </tr>
+          <tr>
+            <td style="background-color: #0f172a; padding: 32px 36px; text-align: center;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
+                <tr>
+                  <td style="vertical-align: middle; padding-right: 12px;">
+                    <div style="background: linear-gradient(135deg, #4f46e5 0%%, #7c3aed 100%%); width: 44px; height: 44px; border-radius: 12px; text-align: center; color: #ffffff; font-size: 22px; font-weight: 800; line-height: 44px; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);">
+                      W
+                    </div>
+                  </td>
+                  <td style="vertical-align: middle; text-align: left;">
+                    <div style="font-size: 24px; font-weight: 800; letter-spacing: 2px; color: #ffffff; line-height: 1.1;">WAAP</div>
+                    <div style="font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #94a3b8; margin-top: 2px;">Account Security</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px 36px 32px 36px;">
+              <h1 class="email-title" style="margin: 0 0 16px 0; font-size: 22px; font-weight: 700; color: #0f172a; text-align: center; letter-spacing: -0.3px;">
+                Reset Your Password
+              </h1>
+              <p class="email-text" style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.6; color: #475569;">
+                Hi <strong class="email-name" style="color: #0f172a;">%s</strong>,
+              </p>
+              <p class="email-text" style="margin: 0 0 28px 0; font-size: 15px; line-height: 1.6; color: #475569;">
+                We received a request to reset the password for your WAAP account. Please use the secure password reset token below:
+              </p>
+              <div class="token-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 24px 20px; text-align: center; margin: 0 0 28px 0;">
+                <span class="token-hint" style="display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: #64748b; margin-bottom: 12px;">Your Password Reset Token</span>
+                <div class="token-pill" style="display: inline-block; background: #ffffff; border: 2px solid #cbd5e1; border-radius: 10px; padding: 12px 20px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04); max-width: 100%%; word-break: break-all;">
+                  <span class="token-text" style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Monaco, monospace; font-size: 16px; font-weight: 700; color: #4338ca; display: inline-block; line-height: 1.4;">%s</span>
+                </div>
+                <div class="token-hint" style="margin-top: 14px; font-size: 12px; font-weight: 600; color: #64748b;">
+                  ⏱️ Valid for <span class="email-name" style="color: #0f172a; font-weight: 700;">15 minutes</span> &bull; Single-use only
+                </div>
+              </div>
+              <div class="warning-card" style="background-color: #fff1f2; border: 1px solid #fecdd3; border-left: 4px solid #e11d48; border-radius: 8px; padding: 16px 18px; margin: 0 0 28px 0;">
+                <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td style="vertical-align: top; width: 28px; font-size: 18px; line-height: 1.2;">
+                      ⚠️
+                    </td>
+                    <td style="vertical-align: top;">
+                      <div class="warning-heading" style="font-size: 13px; font-weight: 700; color: #9f1239; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">
+                        Security Alert
+                      </div>
+                      <div class="warning-body" style="font-size: 13px; line-height: 1.5; color: #be123c;">
+                        If you did not request a password reset, please ignore this email. Your password will not change without this token. Never share this token with anyone.
+                      </div>
+                    </td>
+                  </tr>
+                </table>
+              </div>
+              <p class="sub-text" style="margin: 0; font-size: 13px; line-height: 1.6; color: #94a3b8; text-align: center;">
+                After resetting your password, all existing active login sessions will be invalidated for security.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td class="footer-card" style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 24px 36px; text-align: center;">
+              <p class="footer-title" style="margin: 0 0 6px 0; font-size: 12px; font-weight: 600; color: #64748b;">
+                WAAP E-Commerce Platform
+              </p>
+              <p class="footer-text" style="margin: 0 0 8px 0; font-size: 11px; color: #94a3b8;">
+                &copy; 2026 WAAP Inc. All rights reserved. &bull; Secure Authentication Service
+              </p>
+              <p class="footer-text" style="margin: 0; font-size: 11px; line-height: 1.4; color: #94a3b8;">
+                This is an automated security transmission. Please do not reply directly to this email.
+              </p>
+            </td>
+          </tr>
+        </table>
       </td>
     </tr>
   </table>
 </body>
-</html>`, html.EscapeString(toName), otp)
+</html>`, html.EscapeString(toName), resetToken)
 
+	subject := "Reset Your WAAP Password"
+	return s.sendEmail(ctx, toEmail, toName, subject, htmlContent)
+}
+
+func (s *BrevoSender) sendEmail(ctx context.Context, toEmail, toName, subject, htmlContent string) error {
 	payload := brevoEmailPayload{
 		Sender: brevoSenderInfo{
 			Email: s.fromEmail,
@@ -229,7 +360,7 @@ func (s *BrevoSender) SendVerificationEmail(ctx context.Context, toEmail, toName
 				Name:  toName,
 			},
 		},
-		Subject:     fmt.Sprintf("Your WAAP Verification OTP: %s", otp),
+		Subject:     subject,
 		HTMLContent: htmlContent,
 	}
 
@@ -266,5 +397,10 @@ type NoopSender struct{}
 
 // SendVerificationEmail always returns nil.
 func (n *NoopSender) SendVerificationEmail(ctx context.Context, toEmail, toName, otp string) error {
+	return nil
+}
+
+// SendPasswordResetEmail always returns nil.
+func (n *NoopSender) SendPasswordResetEmail(ctx context.Context, toEmail, toName, resetToken string) error {
 	return nil
 }

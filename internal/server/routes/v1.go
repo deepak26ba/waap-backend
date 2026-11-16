@@ -41,6 +41,9 @@ func RegisterV1(r *gin.Engine, deps Dependencies) {
 	// Domain module wiring
 	userRepo := user.NewRepository(deps.Queries)
 	userService := user.NewService(userRepo, otpStore, mailer, deps.Log, jwtSecret, 15*time.Minute, 7*24*time.Hour, otpTTL)
+	if deps.Config != nil && deps.Config.PasswordResetTokenTTL > 0 {
+		userService.SetPasswordResetTTL(deps.Config.PasswordResetTokenTTL)
+	}
 	userHandler := user.NewHandler(userService, deps.Log)
 
 	productRepo := product.NewRepository(deps.Queries)
@@ -61,6 +64,15 @@ func RegisterV1(r *gin.Engine, deps Dependencies) {
 			auth.POST("/refresh", userHandler.Refresh)
 			auth.POST("/verify-email", userHandler.VerifyEmail)
 			auth.POST("/resend-verification", userHandler.ResendVerification)
+			auth.POST("/forgot-password", userHandler.ForgotPassword)
+			auth.POST("/reset-password", userHandler.ResetPassword)
+		}
+
+		// Root alias for auth routes
+		rootAuth := r.Group("/auth")
+		{
+			rootAuth.POST("/forgot-password", userHandler.ForgotPassword)
+			rootAuth.POST("/reset-password", userHandler.ResetPassword)
 		}
 
 		// Public Product Catalog Routes

@@ -28,6 +28,7 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	ListCategories(ctx context.Context) ([]Category, error)
 	MarkUserEmailVerified(ctx context.Context, id uuid.UUID) (User, error)
+	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) (User, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 }
 

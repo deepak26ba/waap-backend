@@ -25,7 +25,7 @@ func AutoMigrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("failed to initialize schema_migrations table: %w", err)
 	}
 
-	// Ensure email_verified column exists if users table was already created by an earlier run
+	// Ensure email_verified and password_changed_at columns exist if users table was already created by an earlier run
 	if _, err := pool.Exec(ctx, `
 		DO $$
 		BEGIN
@@ -33,10 +33,11 @@ func AutoMigrate(ctx context.Context, pool *pgxpool.Pool) error {
 				SELECT 1 FROM information_schema.tables WHERE table_name = 'users'
 			) THEN
 				ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
+				ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;
 			END IF;
 		END $$;
 	`); err != nil {
-		return fmt.Errorf("failed to ensure email_verified column: %w", err)
+		return fmt.Errorf("failed to ensure email_verified and password_changed_at columns: %w", err)
 	}
 
 	migrations := []struct {
@@ -44,6 +45,7 @@ func AutoMigrate(ctx context.Context, pool *pgxpool.Pool) error {
 		file    string
 	}{
 		{version: "000001_init_schema", file: "000001_init_schema.up.sql"},
+		{version: "000002_add_password_changed_at", file: "000002_add_password_changed_at.up.sql"},
 	}
 
 	for _, m := range migrations {

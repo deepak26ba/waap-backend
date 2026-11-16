@@ -33,5 +33,14 @@ SET email_verified = TRUE,
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdatePassword :one
+UPDATE users
+SET password_hash = $2,
+    password_changed_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING *;
+
+
 
 

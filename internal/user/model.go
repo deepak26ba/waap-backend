@@ -23,10 +23,11 @@ var ErrInvalidToken = errors.New("invalid or expired token")
 
 // Claims represents the JWT claims payload containing essential identity and authorization data.
 type Claims struct {
-	UserID    uuid.UUID `json:"user_id"`
-	Email     string    `json:"email"`
-	Role      string    `json:"role"`
-	TokenType string    `json:"token_type"`
+	UserID           uuid.UUID `json:"user_id"`
+	Email            string    `json:"email"`
+	Role             string    `json:"role"`
+	TokenType        string    `json:"token_type"`
+	IssuedAtUnixNano int64     `json:"iat_nano,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -95,4 +96,25 @@ type LoginResponse struct {
 // RefreshInput models the refresh token request payload.
 type RefreshInput struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+// ForgotPasswordInput models the forgot-password request payload.
+type ForgotPasswordInput struct {
+	Email string `json:"email" binding:"required"`
+}
+
+// ForgotPasswordResponse models the response when a forgot-password request is processed.
+type ForgotPasswordResponse struct {
+	Message string `json:"message"`
+}
+
+// ResetPasswordInput models the reset-password request payload.
+type ResetPasswordInput struct {
+	Token       string `json:"token" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required"`
+}
+
+// ResetPasswordResponse models the response when a password has been successfully reset.
+type ResetPasswordResponse struct {
+	Message string `json:"message"`
 }

@@ -30,10 +30,11 @@ const (
 	// BcryptCost12 is the required hashing cost factor specified in TICKET-06.
 	BcryptCost12 = 12
 
-	DefaultAccessTTL            = 15 * time.Minute
-	DefaultRefreshTTL           = 7 * 24 * time.Hour
-	DefaultVerificationOTPTTL   = 5 * time.Minute
-	DefaultVerificationTokenTTL = DefaultVerificationOTPTTL
+	DefaultAccessTTL             = 15 * time.Minute
+	DefaultRefreshTTL            = 7 * 24 * time.Hour
+	DefaultVerificationOTPTTL    = 5 * time.Minute
+	DefaultVerificationTokenTTL  = DefaultVerificationOTPTTL
+	DefaultPasswordResetTokenTTL = 15 * time.Minute
 )
 
 // Precomputed dummy bcrypt hash (cost 12) for constant-time password comparisons
@@ -48,17 +49,23 @@ type Service interface {
 	GetProfile(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
 	VerifyEmail(ctx context.Context, email, otp string) error
 	ResendVerificationEmail(ctx context.Context, email string) error
+	ForgotPassword(ctx context.Context, email string) error
+	ResetPassword(ctx context.Context, token, newPassword string) error
+	SetPasswordResetStore(store PasswordResetStore)
+	SetPasswordResetTTL(ttl time.Duration)
 }
 
 type service struct {
 	repo                 Repository
 	tokenStore           TokenStore
+	passwordResetStore   PasswordResetStore
 	mailer               email.Sender
 	log                  *zap.Logger
 	jwtSecret            string
 	accessTTL            time.Duration
 	refreshTTL           time.Duration
 	verificationTokenTTL time.Duration
+	passwordResetTTL     time.Duration
 }
 
 // NewService constructs an instance of the user service.
@@ -91,12 +98,26 @@ func NewService(
 	return &service{
 		repo:                 repo,
 		tokenStore:           tokenStore,
+		passwordResetStore:   NewMemoryPasswordResetStore(1 * time.Minute),
 		mailer:               mailer,
 		log:                  log,
 		jwtSecret:            jwtSecret,
 		accessTTL:            accessTTL,
 		refreshTTL:           refreshTTL,
 		verificationTokenTTL: verificationTokenTTL,
+		passwordResetTTL:     DefaultPasswordResetTokenTTL,
+	}
+}
+
+func (s *service) SetPasswordResetStore(store PasswordResetStore) {
+	if store != nil {
+		s.passwordResetStore = store
+	}
+}
+
+func (s *service) SetPasswordResetTTL(ttl time.Duration) {
+	if ttl > 0 {
+		s.passwordResetTTL = ttl
 	}
 }
 
@@ -291,8 +312,33 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 		return nil, response.NewForbiddenError("user account is deactivated")
 	}
 
-	// 4. Issue fresh token pair
-	return GenerateTokenPair(u.ID, u.Email, u.Role, s.jwtSecret, s.accessTTL, s.refreshTTL)
+	// 4. Verify that session has not been revoked due to password reset
+	var issuedAt time.Time
+	if claims.IssuedAt != nil {
+		issuedAt = claims.IssuedAt.Time
+	}
+	if s.passwordResetStore.IsSessionRevoked(u.ID, issuedAt, claims.IssuedAtUnixNano) {
+		return nil, response.NewUnauthorizedError("session has been revoked due to password reset, please log in again")
+	}
+	if u.PasswordChangedAt.Valid && !u.PasswordChangedAt.Time.IsZero() {
+		// Persisted revocation check across server restarts: tokens issued strictly before the last password reset
+		cutoffNano := u.PasswordChangedAt.Time.UnixNano()
+		if claims.IssuedAtUnixNano > 0 {
+			if claims.IssuedAtUnixNano < cutoffNano {
+				return nil, response.NewUnauthorizedError("session has been revoked due to password reset, please log in again")
+			}
+		} else if issuedAt.Before(u.PasswordChangedAt.Time) {
+			return nil, response.NewUnauthorizedError("session has been revoked due to password reset, please log in again")
+		}
+	}
+
+	// 5. Issue fresh token pair, preserving the session's original issuance timestamp on the refresh token
+	// to prevent refresh issuance from crossing a concurrent or subsequent password reset
+	origRefreshNano := claims.IssuedAtUnixNano
+	if origRefreshNano <= 0 && claims.IssuedAt != nil {
+		origRefreshNano = claims.IssuedAt.Time.UnixNano()
+	}
+	return GenerateTokenPairWithIssuedAt(u.ID, u.Email, u.Role, s.jwtSecret, s.accessTTL, s.refreshTTL, origRefreshNano)
 }
 
 // VerifyEmail validates the submitted verification OTP and ensures it matches the provided email address.
@@ -455,22 +501,156 @@ func CheckDummyPassword(password string) {
 	_ = bcrypt.CompareHashAndPassword([]byte(dummyBcryptHash), []byte(password))
 }
 
+// ForgotPassword initiates the password reset process by generating a cryptographically secure,
+// time-limited reset token and sending it to the user's email.
+// The response deliberately returns nil (success) even if the account does not exist (anti-enumeration).
+func (s *service) ForgotPassword(ctx context.Context, rawEmail string) error {
+	rawEmail = strings.TrimSpace(rawEmail)
+	if rawEmail == "" {
+		return response.NewValidationError("validation failed", []response.FieldError{
+			{Field: "email", Message: "email is required"},
+		})
+	}
+
+	parsedAddr, err := mail.ParseAddress(rawEmail)
+	if err != nil || parsedAddr.Address != rawEmail {
+		return response.NewValidationError("validation failed", []response.FieldError{
+			{Field: "email", Message: "invalid email format"},
+		})
+	}
+	emailAddr := strings.ToLower(parsedAddr.Address)
+
+	u, err := s.repo.GetByEmail(ctx, emailAddr)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Anti-enumeration: do not reveal whether account exists
+			return nil
+		}
+		s.log.Error("failed to look up user for forgot password", zap.Error(err))
+		return response.NewInternalError(errors.New("failed to process password reset request"))
+	}
+
+	// Invalidate any older reset tokens for this user
+	s.passwordResetStore.DeleteByUserID(u.ID)
+
+	// Generate cryptographically secure reset token
+	rawToken, tokenHash, err := generateResetToken()
+	if err != nil {
+		s.log.Error("failed to generate password reset token", zap.Error(err), zap.String("user_id", u.ID.String()))
+		return response.NewInternalError(errors.New("failed to generate password reset token"))
+	}
+
+	// Store only the secure hash of the token
+	s.passwordResetStore.Store(tokenHash, u.ID, s.passwordResetTTL)
+
+	// Send through configured email provider asynchronously to ensure comparable response timing
+	// and prevent account enumeration via delivery status or network latency
+	go func(toEmail, toName, token string) {
+		sendCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := s.mailer.SendPasswordResetEmail(sendCtx, toEmail, toName, token); err != nil {
+			s.log.Error("failed to dispatch password reset email", zap.Error(err), zap.String("email", toEmail))
+		}
+	}(u.Email, u.FullName, rawToken)
+
+	s.log.Info("password reset requested", zap.String("user_id", u.ID.String()))
+	return nil
+}
+
+// ResetPassword validates the submitted reset token, hashes the new password with Bcrypt (cost 12),
+// updates the user's password in the database, invalidates existing sessions/refresh tokens, and consumes the token.
+func (s *service) ResetPassword(ctx context.Context, rawToken, newPassword string) error {
+	rawToken = strings.TrimSpace(rawToken)
+	if rawToken == "" {
+		return response.NewValidationError("validation failed", []response.FieldError{
+			{Field: "token", Message: "reset token is required"},
+		})
+	}
+
+	passBytes := []byte(newPassword)
+	if len(passBytes) < 8 || len(passBytes) > 72 {
+		return response.NewValidationError("validation failed", []response.FieldError{
+			{Field: "new_password", Message: "password must be between 8 and 72 characters long"},
+		})
+	}
+
+	// 1. Atomically reserve token before changing password to prevent concurrent reuse
+	tokenHash := hashResetToken(rawToken)
+	userID, err := s.passwordResetStore.Reserve(tokenHash)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrResetTokenAlreadyUsed):
+			return response.NewBadRequestError("TOKEN_ALREADY_USED", "password reset token has already been used")
+		case errors.Is(err, ErrResetTokenExpired):
+			return response.NewBadRequestError("TOKEN_EXPIRED", "password reset token has expired")
+		default:
+			return response.NewBadRequestError("INVALID_TOKEN", "invalid or expired password reset token")
+		}
+	}
+
+	// 2. Hash new password using Bcrypt with cost 12
+	hashedPassword, err := HashPassword(newPassword)
+	if err != nil {
+		s.passwordResetStore.Release(tokenHash)
+		s.log.Error("failed to hash new password", zap.Error(err))
+		return response.NewInternalError(errors.New("failed to process password update"))
+	}
+
+	// 3. Update password in database
+	if _, err := s.repo.UpdatePassword(ctx, userID, hashedPassword); err != nil {
+		s.passwordResetStore.Release(tokenHash)
+		s.log.Error("failed to update password in database", zap.Error(err), zap.String("user_id", userID.String()))
+		return response.NewInternalError(errors.New("failed to reset password"))
+	}
+
+	// 4. Invalidate existing sessions/refresh tokens after successful password reset
+	s.passwordResetStore.RevokeSessions(userID)
+
+	s.log.Info("password reset successfully", zap.String("user_id", userID.String()))
+	return nil
+}
+
+// generateResetToken produces a cryptographically secure 256-bit token (64 hex characters) and its SHA-256 hash.
+func generateResetToken() (string, string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", fmt.Errorf("failed to generate random token: %w", err)
+	}
+	rawToken := hex.EncodeToString(b)
+	tokenHash := hashResetToken(rawToken)
+	return rawToken, tokenHash, nil
+}
+
+// hashResetToken returns the hex-encoded SHA-256 digest of a password reset token string.
+func hashResetToken(rawToken string) string {
+	h := sha256.Sum256([]byte(rawToken))
+	return hex.EncodeToString(h[:])
+}
+
 // GenerateTokenPair issues a short-lived access token and a longer-lived refresh token.
 func GenerateTokenPair(userID uuid.UUID, emailAddr, role, secret string, accessTTL, refreshTTL time.Duration) (*TokenPair, error) {
+	return GenerateTokenPairWithIssuedAt(userID, emailAddr, role, secret, accessTTL, refreshTTL, 0)
+}
+
+// GenerateTokenPairWithIssuedAt issues a short-lived access token and a longer-lived refresh token,
+// allowing preservation of the original session's issuance timestamp on the refresh token.
+func GenerateTokenPairWithIssuedAt(userID uuid.UUID, emailAddr, role, secret string, accessTTL, refreshTTL time.Duration, origRefreshIssuedAtNano int64) (*TokenPair, error) {
 	if secret == "" {
 		return nil, errors.New("jwt secret key cannot be empty")
 	}
 
 	now := time.Now()
+	nowNano := now.UnixNano()
 	accessExpiry := now.Add(accessTTL)
 	refreshExpiry := now.Add(refreshTTL)
 
 	// 1. Build Access Token Claims
 	accessClaims := &Claims{
-		UserID:    userID,
-		Email:     emailAddr,
-		Role:      role,
-		TokenType: TokenTypeAccess,
+		UserID:           userID,
+		Email:            emailAddr,
+		Role:             role,
+		TokenType:        TokenTypeAccess,
+		IssuedAtUnixNano: nowNano,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -484,14 +664,22 @@ func GenerateTokenPair(userID uuid.UUID, emailAddr, role, secret string, accessT
 	}
 
 	// 2. Build Refresh Token Claims
+	refreshIssuedAtTime := now
+	refreshIssuedAtNano := nowNano
+	if origRefreshIssuedAtNano > 0 {
+		refreshIssuedAtNano = origRefreshIssuedAtNano
+		refreshIssuedAtTime = time.Unix(0, origRefreshIssuedAtNano)
+	}
+
 	refreshClaims := &Claims{
-		UserID:    userID,
-		Email:     emailAddr,
-		Role:      role,
-		TokenType: TokenTypeRefresh,
+		UserID:           userID,
+		Email:            emailAddr,
+		Role:             role,
+		TokenType:        TokenTypeRefresh,
+		IssuedAtUnixNano: refreshIssuedAtNano,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
-			IssuedAt:  jwt.NewNumericDate(now),
+			IssuedAt:  jwt.NewNumericDate(refreshIssuedAtTime),
 			ExpiresAt: jwt.NewNumericDate(refreshExpiry),
 		},
 	}

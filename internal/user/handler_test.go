@@ -22,6 +22,8 @@ type mockAuthService struct {
 	getProfileFunc         func(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
 	verifyEmailFunc        func(ctx context.Context, email, otp string) error
 	resendVerificationFunc func(ctx context.Context, email string) error
+	forgotPasswordFunc     func(ctx context.Context, email string) error
+	resetPasswordFunc      func(ctx context.Context, token, newPassword string) error
 }
 
 func (m *mockAuthService) Register(ctx context.Context, in RegisterInput) (*RegisterResponse, error) {
@@ -65,6 +67,23 @@ func (m *mockAuthService) ResendVerificationEmail(ctx context.Context, email str
 	}
 	return nil
 }
+
+func (m *mockAuthService) ForgotPassword(ctx context.Context, email string) error {
+	if m.forgotPasswordFunc != nil {
+		return m.forgotPasswordFunc(ctx, email)
+	}
+	return nil
+}
+
+func (m *mockAuthService) ResetPassword(ctx context.Context, token, newPassword string) error {
+	if m.resetPasswordFunc != nil {
+		return m.resetPasswordFunc(ctx, token, newPassword)
+	}
+	return nil
+}
+
+func (m *mockAuthService) SetPasswordResetStore(store PasswordResetStore) {}
+func (m *mockAuthService) SetPasswordResetTTL(ttl time.Duration)          {}
 
 func setupTestRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -532,6 +551,110 @@ func TestAuthHandler_GetProfile(t *testing.T) {
 
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("expected 401 Unauthorized, got %d", w.Code)
+		}
+	})
+}
+
+func TestAuthHandler_ForgotPassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("Valid request returns 200 OK", func(t *testing.T) {
+		called := false
+		svc := &mockAuthService{
+			forgotPasswordFunc: func(ctx context.Context, email string) error {
+				called = true
+				if email != "user@example.com" {
+					t.Errorf("expected email user@example.com, got %s", email)
+				}
+				return nil
+			},
+		}
+		h := NewHandler(svc, nil)
+		r := gin.New()
+		r.POST("/auth/forgot-password", h.ForgotPassword)
+
+		body := []byte(`{"email":"user@example.com"}`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/forgot-password", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected 200 OK, got %d", w.Code)
+		}
+		if !called {
+			t.Error("expected ForgotPassword service method to be invoked")
+		}
+	})
+
+	t.Run("Missing or malformed JSON returns 400 Bad Request", func(t *testing.T) {
+		h := NewHandler(&mockAuthService{}, nil)
+		r := gin.New()
+		r.POST("/auth/forgot-password", h.ForgotPassword)
+
+		req, _ := http.NewRequest(http.MethodPost, "/auth/forgot-password", bytes.NewBufferString("not-json"))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request, got %d", w.Code)
+		}
+	})
+}
+
+func TestAuthHandler_ResetPassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("Valid request returns 200 OK", func(t *testing.T) {
+		called := false
+		svc := &mockAuthService{
+			resetPasswordFunc: func(ctx context.Context, token, newPassword string) error {
+				called = true
+				if token != "valid-token-123" {
+					t.Errorf("expected token valid-token-123, got %s", token)
+				}
+				if newPassword != "NewPassword123!" {
+					t.Errorf("expected new password NewPassword123!, got %s", newPassword)
+				}
+				return nil
+			},
+		}
+		h := NewHandler(svc, nil)
+		r := gin.New()
+		r.POST("/auth/reset-password", h.ResetPassword)
+
+		body := []byte(`{"token":"valid-token-123","new_password":"NewPassword123!"}`)
+		req, _ := http.NewRequest(http.MethodPost, "/auth/reset-password", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected 200 OK, got %d", w.Code)
+		}
+		if !called {
+			t.Error("expected ResetPassword service method to be invoked")
+		}
+	})
+
+	t.Run("Missing fields returns 400 Bad Request", func(t *testing.T) {
+		h := NewHandler(&mockAuthService{}, nil)
+		r := gin.New()
+		r.POST("/auth/reset-password", h.ResetPassword)
+
+		body := []byte(`{"token":"valid-token"}`) // missing new_password
+		req, _ := http.NewRequest(http.MethodPost, "/auth/reset-password", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request, got %d", w.Code)
 		}
 	})
 }
