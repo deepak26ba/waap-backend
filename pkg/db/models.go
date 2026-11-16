@@ -136,7 +136,7 @@ type User struct {
 	PhoneNumber       pgtype.Text        `json:"phone_number"`
 	IsActive          bool               `json:"is_active"`
 	EmailVerified     bool               `json:"email_verified"`
-	PasswordChangedAt pgtype.Timestamptz `json:"password_changed_at"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	PasswordChangedAt pgtype.Timestamptz `json:"password_changed_at"`
 }

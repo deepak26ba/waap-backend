@@ -22,7 +22,7 @@ INSERT INTO users (
 ) VALUES (
     $1, $2, $3, $4, $5
 )
-RETURNING id, email, password_hash, full_name, role, phone_number, is_active, email_verified, password_changed_at, created_at, updated_at
+RETURNING id, email, password_hash, full_name, role, phone_number, is_active, email_verified, created_at, updated_at, password_changed_at
 `
 
 type CreateUserParams struct {
@@ -51,15 +51,15 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.PhoneNumber,
 		&i.IsActive,
 		&i.EmailVerified,
-		&i.PasswordChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PasswordChangedAt,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, full_name, role, phone_number, is_active, email_verified, password_changed_at, created_at, updated_at FROM users
+SELECT id, email, password_hash, full_name, role, phone_number, is_active, email_verified, created_at, updated_at, password_changed_at FROM users
 WHERE email = $1 LIMIT 1
 `
 
@@ -75,15 +75,15 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.PhoneNumber,
 		&i.IsActive,
 		&i.EmailVerified,
-		&i.PasswordChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PasswordChangedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, full_name, role, phone_number, is_active, email_verified, password_changed_at, created_at, updated_at FROM users
+SELECT id, email, password_hash, full_name, role, phone_number, is_active, email_verified, created_at, updated_at, password_changed_at FROM users
 WHERE id = $1 LIMIT 1
 `
 
@@ -99,9 +99,9 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.PhoneNumber,
 		&i.IsActive,
 		&i.EmailVerified,
-		&i.PasswordChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PasswordChangedAt,
 	)
 	return i, err
 }
@@ -111,7 +111,7 @@ UPDATE users
 SET email_verified = TRUE,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, email, password_hash, full_name, role, phone_number, is_active, email_verified, password_changed_at, created_at, updated_at
+RETURNING id, email, password_hash, full_name, role, phone_number, is_active, email_verified, created_at, updated_at, password_changed_at
 `
 
 func (q *Queries) MarkUserEmailVerified(ctx context.Context, id uuid.UUID) (User, error) {
@@ -126,9 +126,9 @@ func (q *Queries) MarkUserEmailVerified(ctx context.Context, id uuid.UUID) (User
 		&i.PhoneNumber,
 		&i.IsActive,
 		&i.EmailVerified,
-		&i.PasswordChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PasswordChangedAt,
 	)
 	return i, err
 }
@@ -139,7 +139,7 @@ SET password_hash = $2,
     password_changed_at = CURRENT_TIMESTAMP,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, email, password_hash, full_name, role, phone_number, is_active, email_verified, password_changed_at, created_at, updated_at
+RETURNING id, email, password_hash, full_name, role, phone_number, is_active, email_verified, created_at, updated_at, password_changed_at
 `
 
 type UpdatePasswordParams struct {
@@ -159,9 +159,9 @@ func (q *Queries) UpdatePassword(ctx context.Context, arg UpdatePasswordParams) 
 		&i.PhoneNumber,
 		&i.IsActive,
 		&i.EmailVerified,
-		&i.PasswordChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PasswordChangedAt,
 	)
 	return i, err
 }
@@ -172,7 +172,7 @@ SET full_name = COALESCE($2, full_name),
     phone_number = COALESCE($3, phone_number),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, email, password_hash, full_name, role, phone_number, is_active, email_verified, password_changed_at, created_at, updated_at
+RETURNING id, email, password_hash, full_name, role, phone_number, is_active, email_verified, created_at, updated_at, password_changed_at
 `
 
 type UpdateUserParams struct {
@@ -193,9 +193,9 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.PhoneNumber,
 		&i.IsActive,
 		&i.EmailVerified,
-		&i.PasswordChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PasswordChangedAt,
 	)
 	return i, err
 }

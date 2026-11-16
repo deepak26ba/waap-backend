@@ -79,6 +79,7 @@ func (m *mockUserRepository) Update(ctx context.Context, arg db.UpdateUserParams
 	if arg.PhoneNumber.Valid {
 		u.PhoneNumber = arg.PhoneNumber
 	}
+	u.UpdatedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	m.usersByID[u.ID] = u
 	m.usersByEmail[u.Email] = u
 	return u, nil
@@ -901,14 +902,24 @@ func TestUserService_RefreshToken(t *testing.T) {
 			t.Fatalf("failed to login: %v", err)
 		}
 
+		initialUpdatedAt := u.UpdatedAt.Time
+
 		// Simulate profile edit: updates u.UpdatedAt without touching PasswordChangedAt
 		time.Sleep(2 * time.Millisecond)
-		_, err = mock.Update(ctx, db.UpdateUserParams{
+		updatedUser, err := mock.Update(ctx, db.UpdateUserParams{
 			ID:       u.ID,
 			FullName: "Updated Name",
 		})
 		if err != nil {
 			t.Fatalf("failed to update profile: %v", err)
+		}
+
+		// Assert that UpdatedAt advanced and PasswordChangedAt remained unchanged
+		if !updatedUser.UpdatedAt.Time.After(initialUpdatedAt) {
+			t.Errorf("expected UpdatedAt to advance from %v, got %v", initialUpdatedAt, updatedUser.UpdatedAt.Time)
+		}
+		if updatedUser.PasswordChangedAt.Valid {
+			t.Errorf("expected PasswordChangedAt to remain unset/invalid, got %v", updatedUser.PasswordChangedAt)
 		}
 
 		// Refresh token must STILL work because password was not changed!
