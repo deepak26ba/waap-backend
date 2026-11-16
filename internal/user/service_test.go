@@ -93,9 +93,24 @@ func (m *mockUserRepository) MarkUserEmailVerified(ctx context.Context, id uuid.
 	return u, nil
 }
 
+func (m *mockUserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) (db.User, error) {
+	u, ok := m.usersByID[id]
+	if !ok {
+		return db.User{}, pgx.ErrNoRows
+	}
+	u.PasswordHash = passwordHash
+	u.UpdatedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	m.usersByID[id] = u
+	m.usersByEmail[u.Email] = u
+	return u, nil
+}
+
 type mockEmailSender struct {
 	sentEmails []struct {
 		Email, Name, OTP string
+	}
+	sentResetEmails []struct {
+		Email, Name, Token string
 	}
 	err error
 }
@@ -108,6 +123,18 @@ func (m *mockEmailSender) SendVerificationEmail(ctx context.Context, toEmail, to
 		Email: toEmail,
 		Name:  toName,
 		OTP:   otp,
+	})
+	return nil
+}
+
+func (m *mockEmailSender) SendPasswordResetEmail(ctx context.Context, toEmail, toName, token string) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.sentResetEmails = append(m.sentResetEmails, struct{ Email, Name, Token string }{
+		Email: toEmail,
+		Name:  toName,
+		Token: token,
 	})
 	return nil
 }
@@ -890,6 +917,222 @@ func TestUserService_GetProfile(t *testing.T) {
 		}
 		if apiErr.StatusCode != 404 {
 			t.Errorf("expected status 404, got %d", apiErr.StatusCode)
+		}
+	})
+}
+
+func TestUserService_ForgotPassword(t *testing.T) {
+	ctx := context.Background()
+	secret := "test-secret"
+	mock := newMockUserRepository()
+	mailer := &mockEmailSender{}
+	svc := NewService(mock, nil, mailer, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
+
+	_, err := svc.Register(ctx, RegisterInput{
+		Email:    "forgot@example.com",
+		Password: "OldPassword123!",
+		FullName: "Forgot User",
+	})
+	if err != nil {
+		t.Fatalf("failed to register user: %v", err)
+	}
+
+	t.Run("Valid registered email sends reset token and returns success", func(t *testing.T) {
+		err := svc.ForgotPassword(ctx, "forgot@example.com")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(mailer.sentResetEmails) != 1 {
+			t.Fatalf("expected 1 reset email sent, got %d", len(mailer.sentResetEmails))
+		}
+		sent := mailer.sentResetEmails[0]
+		if sent.Email != "forgot@example.com" {
+			t.Errorf("expected recipient forgot@example.com, got %s", sent.Email)
+		}
+		if sent.Token == "" {
+			t.Error("expected non-empty reset token")
+		}
+	})
+
+	t.Run("Non-existent email returns success without sending email (anti-enumeration)", func(t *testing.T) {
+		countBefore := len(mailer.sentResetEmails)
+		err := svc.ForgotPassword(ctx, "doesnotexist@example.com")
+		if err != nil {
+			t.Fatalf("expected nil error for anti-enumeration, got %v", err)
+		}
+		if len(mailer.sentResetEmails) != countBefore {
+			t.Errorf("expected no additional email sent for unknown address")
+		}
+	})
+
+	t.Run("Invalid email format returns 422 validation error", func(t *testing.T) {
+		err := svc.ForgotPassword(ctx, "not-an-email")
+		if err == nil {
+			t.Fatal("expected error for invalid email format, got nil")
+		}
+		var apiErr *response.AppError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("expected AppError, got %T", err)
+		}
+		if apiErr.StatusCode != 422 {
+			t.Errorf("expected status 422, got %d", apiErr.StatusCode)
+		}
+	})
+
+	t.Run("Empty email returns 422 validation error", func(t *testing.T) {
+		err := svc.ForgotPassword(ctx, "   ")
+		if err == nil {
+			t.Fatal("expected error for empty email, got nil")
+		}
+		var apiErr *response.AppError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != 422 {
+			t.Errorf("expected status 422, got %v", err)
+		}
+	})
+}
+
+func TestUserService_ResetPassword(t *testing.T) {
+	ctx := context.Background()
+	secret := "test-secret"
+	mock := newMockUserRepository()
+	mailer := &mockEmailSender{}
+	resetStore := NewMemoryPasswordResetStore(1 * time.Minute)
+	svc := NewService(mock, nil, mailer, nil, secret, 15*time.Minute, 7*24*time.Hour, 24*time.Hour)
+	svc.SetPasswordResetStore(resetStore)
+
+	// Register user
+	_, err := svc.Register(ctx, RegisterInput{
+		Email:    "resetuser@example.com",
+		Password: "OldPassword123!",
+		FullName: "Reset User",
+	})
+	if err != nil {
+		t.Fatalf("failed to register user: %v", err)
+	}
+
+	// Login to obtain active tokens before reset
+	loginRes, err := svc.Login(ctx, LoginInput{
+		Email:    "resetuser@example.com",
+		Password: "OldPassword123!",
+	})
+	if err != nil {
+		t.Fatalf("failed to login: %v", err)
+	}
+	preResetRefreshToken := loginRes.RefreshToken
+
+	// Verify pre-reset refresh token works before password change
+	_, err = svc.RefreshToken(ctx, preResetRefreshToken)
+	if err != nil {
+		t.Fatalf("expected refresh token to work before reset: %v", err)
+	}
+
+	// Request forgot password
+	err = svc.ForgotPassword(ctx, "resetuser@example.com")
+	if err != nil {
+		t.Fatalf("failed to request forgot password: %v", err)
+	}
+	resetToken := mailer.sentResetEmails[len(mailer.sentResetEmails)-1].Token
+
+	t.Run("Successfully resets password, revokes existing refresh tokens, and allows new login", func(t *testing.T) {
+		newPassword := "NewStrongPassword123!"
+		err := svc.ResetPassword(ctx, resetToken, newPassword)
+		if err != nil {
+			t.Fatalf("failed to reset password: %v", err)
+		}
+
+		// 1. Old password is now rejected
+		_, err = svc.Login(ctx, LoginInput{
+			Email:    "resetuser@example.com",
+			Password: "OldPassword123!",
+		})
+		if err == nil {
+			t.Fatal("expected old password to fail login, got nil")
+		}
+
+		// 2. New password succeeds
+		newLoginRes, err := svc.Login(ctx, LoginInput{
+			Email:    "resetuser@example.com",
+			Password: newPassword,
+		})
+		if err != nil {
+			t.Fatalf("expected new password to succeed, got %v", err)
+		}
+		if newLoginRes.AccessToken == "" {
+			t.Error("expected non-empty access token after reset login")
+		}
+
+		// 3. Existing refresh tokens issued before password reset are revoked!
+		_, err = svc.RefreshToken(ctx, preResetRefreshToken)
+		if err == nil {
+			t.Fatal("expected pre-reset refresh token to be revoked, got nil")
+		}
+		var apiErr *response.AppError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != 401 {
+			t.Errorf("expected 401 for revoked refresh token, got %v", err)
+		}
+
+		// 4. Fresh refresh token issued with new password works
+		_, err = svc.RefreshToken(ctx, newLoginRes.RefreshToken)
+		if err != nil {
+			t.Fatalf("expected new refresh token to work, got %v", err)
+		}
+	})
+
+	t.Run("Used token cannot be reused", func(t *testing.T) {
+		err := svc.ResetPassword(ctx, resetToken, "AnotherPassword123!")
+		if err == nil {
+			t.Fatal("expected used token to be rejected, got nil")
+		}
+		var apiErr *response.AppError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("expected AppError, got %T", err)
+		}
+		if apiErr.StatusCode != 400 || apiErr.Code != "TOKEN_ALREADY_USED" {
+			t.Errorf("expected 400 TOKEN_ALREADY_USED, got %d %s", apiErr.StatusCode, apiErr.Code)
+		}
+	})
+
+	t.Run("Invalid token is rejected", func(t *testing.T) {
+		err := svc.ResetPassword(ctx, "completely-invalid-token", "AnotherPassword123!")
+		if err == nil {
+			t.Fatal("expected invalid token to be rejected, got nil")
+		}
+		var apiErr *response.AppError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("expected AppError, got %T", err)
+		}
+		if apiErr.StatusCode != 400 || apiErr.Code != "INVALID_TOKEN" {
+			t.Errorf("expected 400 INVALID_TOKEN, got %d %s", apiErr.StatusCode, apiErr.Code)
+		}
+	})
+
+	t.Run("Expired token is rejected", func(t *testing.T) {
+		u := mock.usersByEmail["resetuser@example.com"]
+		expiredRawToken := "expired-token-raw-12345"
+		expiredHash := hashResetToken(expiredRawToken)
+		resetStore.Store(expiredHash, u.ID, -1*time.Second)
+
+		err := svc.ResetPassword(ctx, expiredRawToken, "AnotherPassword123!")
+		if err == nil {
+			t.Fatal("expected expired token to be rejected, got nil")
+		}
+		var apiErr *response.AppError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("expected AppError, got %T", err)
+		}
+		if apiErr.StatusCode != 400 || apiErr.Code != "TOKEN_EXPIRED" {
+			t.Errorf("expected 400 TOKEN_EXPIRED, got %d %s", apiErr.StatusCode, apiErr.Code)
+		}
+	})
+
+	t.Run("Rejects password with invalid length", func(t *testing.T) {
+		err := svc.ResetPassword(ctx, "some-token", "short")
+		if err == nil {
+			t.Fatal("expected validation error for short password, got nil")
+		}
+		var apiErr *response.AppError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != 422 {
+			t.Errorf("expected 422 for short password, got %v", err)
 		}
 	})
 }

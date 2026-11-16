@@ -15,6 +15,7 @@ type Repository interface {
 	Create(ctx context.Context, params db.CreateUserParams) (db.User, error)
 	Update(ctx context.Context, params db.UpdateUserParams) (db.User, error)
 	MarkUserEmailVerified(ctx context.Context, id uuid.UUID) (db.User, error)
+	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) (db.User, error)
 }
 
 type repository struct {
@@ -44,4 +45,11 @@ func (r *repository) Update(ctx context.Context, params db.UpdateUserParams) (db
 
 func (r *repository) MarkUserEmailVerified(ctx context.Context, id uuid.UUID) (db.User, error) {
 	return r.queries.MarkUserEmailVerified(ctx, id)
+}
+
+func (r *repository) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) (db.User, error) {
+	return r.queries.UpdatePassword(ctx, db.UpdatePasswordParams{
+		ID:           id,
+		PasswordHash: passwordHash,
+	})
 }
