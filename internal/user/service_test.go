@@ -101,6 +101,7 @@ func (m *mockUserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, p
 		return db.User{}, pgx.ErrNoRows
 	}
 	u.PasswordHash = passwordHash
+	u.PasswordChangedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	u.UpdatedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	m.usersByID[id] = u
 	m.usersByEmail[u.Email] = u
@@ -886,6 +887,39 @@ func TestUserService_RefreshToken(t *testing.T) {
 			t.Errorf("expected status 403, got %d", apiErr.StatusCode)
 		}
 	})
+
+	t.Run("Profile edit or email verification does not revoke refresh token", func(t *testing.T) {
+		u := mock.usersByEmail["refresh@example.com"]
+		u.IsActive = true
+		mock.usersByID[u.ID] = u
+
+		freshLogin, err := svc.Login(ctx, LoginInput{
+			Email:    "refresh@example.com",
+			Password: password,
+		})
+		if err != nil {
+			t.Fatalf("failed to login: %v", err)
+		}
+
+		// Simulate profile edit: updates u.UpdatedAt without touching PasswordChangedAt
+		time.Sleep(2 * time.Millisecond)
+		_, err = mock.Update(ctx, db.UpdateUserParams{
+			ID:       u.ID,
+			FullName: "Updated Name",
+		})
+		if err != nil {
+			t.Fatalf("failed to update profile: %v", err)
+		}
+
+		// Refresh token must STILL work because password was not changed!
+		refreshed, err := svc.RefreshToken(ctx, freshLogin.RefreshToken)
+		if err != nil {
+			t.Fatalf("expected refresh token to remain valid after profile edit, got error: %v", err)
+		}
+		if refreshed.AccessToken == "" {
+			t.Error("expected non-empty access token")
+		}
+	})
 }
 
 func TestUserService_GetProfile(t *testing.T) {
@@ -1245,6 +1279,49 @@ func TestUserService_ResetPassword(t *testing.T) {
 		_, err = restartedSvc.RefreshToken(ctx, postRestartLogin.RefreshToken)
 		if err != nil {
 			t.Fatalf("expected new refresh token to work after server restart: %v", err)
+		}
+	})
+
+	t.Run("Refresh token chain cannot cross password reset", func(t *testing.T) {
+		loginRes, err := svc.Login(ctx, LoginInput{
+			Email:    "resetuser@example.com",
+			Password: "RestartPassword999!",
+		})
+		if err != nil {
+			t.Fatalf("failed to login: %v", err)
+		}
+
+		// User refreshes token once before reset
+		refreshed1, err := svc.RefreshToken(ctx, loginRes.RefreshToken)
+		if err != nil {
+			t.Fatalf("refresh 1 failed: %v", err)
+		}
+
+		// Reset password
+		err = svc.ForgotPassword(ctx, "resetuser@example.com")
+		if err != nil {
+			t.Fatalf("forgot password failed: %v", err)
+		}
+		var sent []struct{ Email, Name, Token string }
+		curCount := len(mailer.getSentResetEmails())
+		for start := time.Now(); time.Since(start) < 2*time.Second; {
+			sent = mailer.getSentResetEmails()
+			if len(sent) > curCount {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		tok := sent[len(sent)-1].Token
+
+		err = svc.ResetPassword(ctx, tok, "EvenNewerPass999!")
+		if err != nil {
+			t.Fatalf("reset password failed: %v", err)
+		}
+
+		// Attempting to refresh refreshed1.RefreshToken must FAIL because its session originated before reset!
+		_, err = svc.RefreshToken(ctx, refreshed1.RefreshToken)
+		if err == nil {
+			t.Fatal("expected refreshed token from pre-reset session to be revoked, got nil")
 		}
 	})
 

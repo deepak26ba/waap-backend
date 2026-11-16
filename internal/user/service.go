@@ -320,20 +320,25 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 	if s.passwordResetStore.IsSessionRevoked(u.ID, issuedAt, claims.IssuedAtUnixNano) {
 		return nil, response.NewUnauthorizedError("session has been revoked due to password reset, please log in again")
 	}
-	if u.UpdatedAt.Valid && !u.UpdatedAt.Time.IsZero() {
-		// Persisted revocation check across server restarts: tokens issued strictly before the last password update
-		cutoffNano := u.UpdatedAt.Time.UnixNano()
+	if u.PasswordChangedAt.Valid && !u.PasswordChangedAt.Time.IsZero() {
+		// Persisted revocation check across server restarts: tokens issued strictly before the last password reset
+		cutoffNano := u.PasswordChangedAt.Time.UnixNano()
 		if claims.IssuedAtUnixNano > 0 {
 			if claims.IssuedAtUnixNano < cutoffNano {
 				return nil, response.NewUnauthorizedError("session has been revoked due to password reset, please log in again")
 			}
-		} else if issuedAt.Before(u.UpdatedAt.Time) {
+		} else if issuedAt.Before(u.PasswordChangedAt.Time) {
 			return nil, response.NewUnauthorizedError("session has been revoked due to password reset, please log in again")
 		}
 	}
 
-	// 5. Issue fresh token pair
-	return GenerateTokenPair(u.ID, u.Email, u.Role, s.jwtSecret, s.accessTTL, s.refreshTTL)
+	// 5. Issue fresh token pair, preserving the session's original issuance timestamp on the refresh token
+	// to prevent refresh issuance from crossing a concurrent or subsequent password reset
+	origRefreshNano := claims.IssuedAtUnixNano
+	if origRefreshNano <= 0 && claims.IssuedAt != nil {
+		origRefreshNano = claims.IssuedAt.Time.UnixNano()
+	}
+	return GenerateTokenPairWithIssuedAt(u.ID, u.Email, u.Role, s.jwtSecret, s.accessTTL, s.refreshTTL, origRefreshNano)
 }
 
 // VerifyEmail validates the submitted verification OTP and ensures it matches the provided email address.
@@ -624,6 +629,12 @@ func hashResetToken(rawToken string) string {
 
 // GenerateTokenPair issues a short-lived access token and a longer-lived refresh token.
 func GenerateTokenPair(userID uuid.UUID, emailAddr, role, secret string, accessTTL, refreshTTL time.Duration) (*TokenPair, error) {
+	return GenerateTokenPairWithIssuedAt(userID, emailAddr, role, secret, accessTTL, refreshTTL, 0)
+}
+
+// GenerateTokenPairWithIssuedAt issues a short-lived access token and a longer-lived refresh token,
+// allowing preservation of the original session's issuance timestamp on the refresh token.
+func GenerateTokenPairWithIssuedAt(userID uuid.UUID, emailAddr, role, secret string, accessTTL, refreshTTL time.Duration, origRefreshIssuedAtNano int64) (*TokenPair, error) {
 	if secret == "" {
 		return nil, errors.New("jwt secret key cannot be empty")
 	}
@@ -653,15 +664,22 @@ func GenerateTokenPair(userID uuid.UUID, emailAddr, role, secret string, accessT
 	}
 
 	// 2. Build Refresh Token Claims
+	refreshIssuedAtTime := now
+	refreshIssuedAtNano := nowNano
+	if origRefreshIssuedAtNano > 0 {
+		refreshIssuedAtNano = origRefreshIssuedAtNano
+		refreshIssuedAtTime = time.Unix(0, origRefreshIssuedAtNano)
+	}
+
 	refreshClaims := &Claims{
 		UserID:           userID,
 		Email:            emailAddr,
 		Role:             role,
 		TokenType:        TokenTypeRefresh,
-		IssuedAtUnixNano: nowNano,
+		IssuedAtUnixNano: refreshIssuedAtNano,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
-			IssuedAt:  jwt.NewNumericDate(now),
+			IssuedAt:  jwt.NewNumericDate(refreshIssuedAtTime),
 			ExpiresAt: jwt.NewNumericDate(refreshExpiry),
 		},
 	}
